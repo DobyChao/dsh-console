@@ -1,120 +1,141 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
+import { t } from "../i18n";
 import { api } from "../lib/api";
+import { useLauncher } from "../lib/launcher";
+import type { InstancePatch } from "../lib/types";
+import { Button } from "./Button";
+import { Modal, ModalFooterActions } from "./Modal";
+import { TextInput } from "./TextInput";
 import ui from "../styles/ui.module.css";
 
-export function AddInstanceDialog({
-  draft,
-  onChange,
-  onClose,
-  onSubmit,
-}: {
-  draft: { displayName: string; dshHome: string; port: number };
-  onChange: (next: { displayName: string; dshHome: string; port: number }) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  const homeRef = useRef<HTMLInputElement>(null);
+interface Draft {
+  displayName: string;
+  dshHome: string;
+  port: string;
+}
+
+function folderName(path: string): string {
+  return path.split(/[/\\]/).filter(Boolean).pop() ?? "";
+}
+
+export function AddInstanceDialog({ onClose }: { onClose: () => void }) {
+  const { addInstance, isBusy } = useLauncher();
+  const [draft, setDraft] = useState<Draft>({ displayName: "", dshHome: "", port: "3081" });
+  const [errors, setErrors] = useState<{ home?: string; port?: string }>({});
+  const submitting = isBusy("add-instance");
+
   useEffect(() => {
-    homeRef.current?.focus();
+    let cancelled = false;
+    api
+      .nextInstancePort()
+      .then((port) => {
+        if (!cancelled) setDraft((d) => ({ ...d, port: String(port) }));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  function submitIfReady() {
-    if (draft.dshHome.trim()) onSubmit();
+  function patch(next: Partial<Draft>) {
+    setDraft((d) => ({ ...d, ...next }));
+    setErrors((e) => ({ ...e, ...Object.fromEntries(Object.keys(next).map((k) => [k, undefined])) }));
+  }
+
+  function pickFolder() {
+    api.pickFolder().then((p) => {
+      if (!p) return;
+      patch({ dshHome: p, displayName: draft.displayName.trim() || folderName(p) });
+    });
+  }
+
+  function validate(): boolean {
+    const next: { home?: string; port?: string } = {};
+    if (!draft.dshHome.trim()) next.home = t("addInstance.homeRequired");
+    const port = Number(draft.port);
+    if (!/^\d+$/.test(draft.port.trim()) || port < 1 || port > 65535) {
+      next.port = t("addInstance.portInvalid");
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
+  async function submit() {
+    if (!validate()) return;
+    const p: InstancePatch = {
+      displayName: draft.displayName.trim() || folderName(draft.dshHome) || t("addInstance.defaultName"),
+      dshHome: draft.dshHome.trim(),
+      port: Number(draft.port.trim()),
+      profile: "web",
+    };
+    if (await addInstance(p)) onClose();
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        className="w-full max-w-[480px] rounded-lg border border-border bg-surface p-6 shadow-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-instance-title"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submitIfReady();
-          }
+    <Modal title={t("addInstance.title")} onClose={onClose}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
         }}
       >
-        <h2 id="add-instance-title" className="m-0 text-[15px] font-semibold leading-[22px]">
-          添加实例
-        </h2>
-        <p className="mt-2 mb-5 text-[13px] leading-5 text-label-3">
-          每个实例使用独立的 home 目录和端口，互不影响。第一次启动时会在该目录初始化。
-        </p>
+        <p className="mt-2 mb-5 text-[13px] leading-5 text-label-3">{t("addInstance.desc")}</p>
 
         <label className={ui.label} htmlFor="add-instance-home">
-          Home 目录
+          {t("addInstance.homeLabel")}
         </label>
         <div className={`${ui.row} mb-1`}>
-          <input
+          <TextInput
             id="add-instance-home"
-            ref={homeRef}
-            className={`${ui.input} font-mono text-[13px]`}
+            data-autofocus
+            className="font-mono text-[13px]"
+            invalid={Boolean(errors.home)}
             value={draft.dshHome}
-            onChange={(e) => onChange({ ...draft, dshHome: e.target.value })}
-            placeholder="C:\Users\Admin\.dsh-work"
+            onChange={(e) => patch({ dshHome: e.target.value })}
+            placeholder={t("addInstance.homePlaceholder")}
           />
-          <button
-            type="button"
-            className={`${ui.ghost} shrink-0 whitespace-nowrap`}
-            onClick={() =>
-              api.pickFolder().then((p) => {
-                if (!p) return;
-                const name = p.split(/[/\\]/).filter(Boolean).pop() ?? "";
-                onChange({
-                  ...draft,
-                  dshHome: p,
-                  displayName: draft.displayName.trim() || name,
-                });
-              })
-            }
-          >
-            浏览
-          </button>
+          <Button className="shrink-0 whitespace-nowrap" onClick={() => void pickFolder()}>
+            {t("common.browse")}
+          </Button>
         </div>
-        <p className="mb-4 text-xs leading-[18px] text-label-3">对应环境变量 DSH_HOME。可用空目录，或已有的 harness home。</p>
+        {errors.home ? <p className={ui.fieldError}>{errors.home}</p> : null}
+        <p className="mb-4 text-xs leading-[18px] text-label-3">{t("addInstance.homeHint")}</p>
 
         <label className={ui.label} htmlFor="add-instance-name">
-          显示名
+          {t("addInstance.nameLabel")}
         </label>
-        <input
+        <TextInput
           id="add-instance-name"
-          className={`${ui.input} mb-4`}
+          className="mb-4"
           value={draft.displayName}
-          onChange={(e) => onChange({ ...draft, displayName: e.target.value })}
-          placeholder="浏览目录后会自动填入文件夹名"
+          onChange={(e) => patch({ displayName: e.target.value })}
+          placeholder={t("addInstance.namePlaceholder")}
         />
 
         <label className={ui.label} htmlFor="add-instance-port">
-          端口
+          {t("addInstance.portLabel")}
         </label>
-        <input
+        <TextInput
           id="add-instance-port"
-          className={`${ui.input} w-32`}
+          className="w-32"
           type="number"
           min={1}
           max={65535}
+          inputMode="numeric"
+          invalid={Boolean(errors.port)}
           value={draft.port}
-          onChange={(e) => onChange({ ...draft, port: Number(e.target.value) })}
+          onChange={(e) => patch({ port: e.target.value })}
         />
-        <p className="mt-1 mb-0 text-xs leading-[18px] text-label-3">本机 Web UI 监听端口。第二实例建议 3081。</p>
+        {errors.port ? <p className={ui.fieldError}>{errors.port}</p> : null}
+        <p className="mt-1 mb-0 text-xs leading-[18px] text-label-3">{t("addInstance.portHint")}</p>
 
-        <div className="mt-6 flex justify-end gap-2">
-          <button type="button" className={ui.ghost} onClick={onClose}>
-            取消
-          </button>
-          <button type="button" className={ui.primary} disabled={!draft.dshHome.trim()} onClick={onSubmit}>
-            添加
-          </button>
-        </div>
-      </div>
-    </div>
+        <ModalFooterActions>
+          <Button onClick={onClose}>{t("common.cancel")}</Button>
+          <Button type="submit" variant="primary" busy={submitting} disabled={!draft.dshHome.trim()}>
+            {t("addInstance.submit")}
+          </Button>
+        </ModalFooterActions>
+      </form>
+    </Modal>
   );
 }

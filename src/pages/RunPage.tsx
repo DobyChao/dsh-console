@@ -1,59 +1,65 @@
-import { useEffect, useRef } from "react";
-import { ExternalLinkIcon } from "../components/icons";
-import { StatusDot, statusLabel } from "../components/StatusDot";
-import { api, errMessage } from "../lib/api";
-import type { Instance, LauncherState, RuntimeInfo } from "../lib/types";
-import ui from "../styles/ui.module.css";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n";
+import { useLauncher } from "../lib/launcher";
+import { Button } from "../components/Button";
+import { ExternalLinkIcon, FolderIcon } from "../components/icons";
+import { StatusDot } from "../components/StatusDot";
+import { statusLabel } from "../lib/status";
 import styles from "./RunPage.module.css";
 
+const STICK_THRESHOLD = 40;
+
 export function RunPage({
-  focused,
-  runtime,
-  logs,
+  visible,
   listCollapsed,
   onExpandList,
-  onClearLogs,
-  onState,
-  onError,
 }: {
-  focused?: Instance;
-  runtime?: RuntimeInfo;
-  logs: string[];
+  visible: boolean;
   listCollapsed: boolean;
   onExpandList: () => void;
-  onClearLogs: () => void;
-  onState: (s: LauncherState) => void;
-  onError: (msg: string | null) => void;
 }) {
+  const { focused, runtime, logsOf, startInstance, stopInstance, openInstanceUrl, clearLogs, isBusy } = useLauncher();
   const logRef = useRef<HTMLPreElement>(null);
+  const stickRef = useRef(true);
+  const [detached, setDetached] = useState(false);
+  const logs = useMemo(() => (focused ? logsOf(focused.id) : []), [focused, logsOf]);
+
   useEffect(() => {
-    logRef.current?.scrollTo(0, logRef.current.scrollHeight);
-  }, [logs]);
+    // 隐藏期间尺寸为 0，重新显示时也要贴底一次
+    if (stickRef.current) logRef.current?.scrollTo(0, logRef.current.scrollHeight);
+  }, [logs, visible]);
 
   if (!focused) {
-    return <div className={styles.empty}>请先添加一个实例。</div>;
+    return (
+      <div className={styles.empty}>
+        <FolderIcon className={styles.emptyIcon} />
+        <p className={styles.emptyText}>{t("run.emptyInstance")}</p>
+      </div>
+    );
   }
 
   const inst = focused;
   const status = runtime?.status ?? "idle";
-  const running = status === "starting" || status === "ready" || status === "stopping";
+  const transition = status === "starting" || status === "stopping";
+  const running = transition || status === "ready";
   const canOpen = Boolean(runtime?.url) && inst.profile === "web";
+  const actionBusy = isBusy(`start:${inst.id}`) || isBusy(`stop:${inst.id}`);
+  const logText = logs.length ? logs.join("\n") : t("run.logEmpty");
 
-  async function act(fn: () => Promise<LauncherState>) {
-    onError(null);
-    try {
-      onState(await fn());
-    } catch (e) {
-      onError(errMessage(e));
-    }
+  function onLogScroll() {
+    const el = logRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
+    stickRef.current = atBottom;
+    setDetached(!atBottom);
   }
 
-  async function openUrl() {
-    try {
-      await api.openInstanceUrl(inst.id);
-    } catch (e) {
-      onError(errMessage(e));
-    }
+  function jumpToBottom() {
+    const el = logRef.current;
+    if (!el) return;
+    stickRef.current = true;
+    setDetached(false);
+    el.scrollTo(0, el.scrollHeight);
   }
 
   return (
@@ -61,42 +67,47 @@ export function RunPage({
       {listCollapsed ? (
         <div className={styles.toolbar}>
           <button type="button" className={styles.textBtn} onClick={onExpandList}>
-            显示实例
+            {t("run.showInstances")}
           </button>
         </div>
       ) : null}
 
       <section className={styles.statusCard}>
         <header className={styles.cardHead}>
-          <h1 className={styles.pageTitle}>运行</h1>
+          <h1 className={styles.pageTitle}>{t("run.title")}</h1>
           <div className={styles.actions}>
             {running ? (
-              <button type="button" className={ui.primary} onClick={() => act(() => api.stopInstance(inst.id))}>
-                停止
-              </button>
+              <Button variant="primary" busy={actionBusy} disabled={transition} onClick={() => void stopInstance(inst.id)}>
+                {t("run.stop")}
+              </Button>
             ) : (
-              <button type="button" className={ui.primary} onClick={() => act(() => api.startInstance(inst.id))}>
-                启动
-              </button>
+              <Button variant="primary" busy={actionBusy} disabled={transition} onClick={() => void startInstance(inst.id)}>
+                {t("run.start")}
+              </Button>
             )}
-            <button type="button" className={ui.ghost} disabled={!canOpen} onClick={() => void openUrl()}>
-              打开 Web UI
-            </button>
+            <Button disabled={!canOpen} onClick={() => void openInstanceUrl(inst.id)}>
+              {t("run.openWeb")}
+            </Button>
           </div>
         </header>
         <dl className={styles.meta}>
           <div className={styles.metaRow}>
-            <dt>状态</dt>
+            <dt>{t("run.stateLabel")}</dt>
             <dd>
               <StatusDot status={status} />
               <span>{statusLabel(status)}</span>
             </dd>
           </div>
           <div className={styles.metaRow}>
-            <dt>地址</dt>
+            <dt>{t("run.addressLabel")}</dt>
             <dd>
               {runtime?.url ? (
-                <button type="button" className={styles.link} onClick={() => void openUrl()} disabled={!canOpen}>
+                <button
+                  type="button"
+                  className={styles.link}
+                  onClick={() => void openInstanceUrl(inst.id)}
+                  disabled={!canOpen}
+                >
                   {runtime.url}
                   <ExternalLinkIcon className={styles.linkIcon} />
                 </button>
@@ -106,19 +117,34 @@ export function RunPage({
             </dd>
           </div>
         </dl>
-        {runtime?.error ? <p className={ui.error}>{runtime.error}</p> : null}
+        {runtime?.error ? <p className={styles.runtimeError}>{runtime.error}</p> : null}
       </section>
 
       <section className={styles.logCard}>
         <div className={styles.logHead}>
-          <span className={styles.logTitle}>日志</span>
-          <button type="button" className={styles.clear} onClick={onClearLogs} disabled={logs.length === 0}>
-            清空
+          <span className={styles.logTitle}>
+            {t("run.logs")}
+            {logs.length ? <span className={styles.logCount}>{t("run.logLines", { count: logs.length })}</span> : null}
+          </span>
+          <button
+            type="button"
+            className={styles.clear}
+            onClick={() => void clearLogs(inst.id)}
+            disabled={logs.length === 0}
+          >
+            {t("run.clear")}
           </button>
         </div>
-        <pre ref={logRef} className={styles.log}>
-          {logs.length ? logs.join("\n") : "启动后会显示进程输出。"}
-        </pre>
+        <div className={styles.logViewport}>
+          <pre ref={logRef} className={styles.log} onScroll={onLogScroll}>
+            {logText}
+          </pre>
+          {detached ? (
+            <button type="button" className={styles.jump} onClick={jumpToBottom}>
+              {t("run.jumpBottom")}
+            </button>
+          ) : null}
+        </div>
       </section>
     </div>
   );

@@ -12,10 +12,6 @@ export function parseSourceUrl(url: string): { repo: string; subpath: string | n
   return { repo: m[1], subpath };
 }
 
-export function repoOf(url: string): string | null {
-  return parseSourceUrl(url)?.repo ?? null;
-}
-
 export function installTargetFor(entry: { url: string; npm?: unknown }): string | null {
   const source = parseSourceUrl(entry.url);
   if (source === null) return null;

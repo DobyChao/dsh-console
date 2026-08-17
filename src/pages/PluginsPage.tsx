@@ -1,165 +1,169 @@
-import { useEffect, useMemo, useState } from "react";
-import { InstanceCapsule } from "../components/InstanceCapsule";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { t } from "../i18n";
 import { api, errMessage } from "../lib/api";
+import { useLauncher } from "../lib/launcher";
 import { filterPlugins, findInstalledName, mergeCatalogs, planFromKnownFields } from "../lib/catalog";
-import type { CuratedCatalog, InstalledPlugin, Instance, LauncherState, MergedPlugin, RuntimeInfo } from "../lib/types";
+import type { CuratedCatalog, InstalledPlugin, MergedPlugin } from "../lib/types";
+import { Button } from "../components/Button";
+import { InstanceCapsule } from "../components/InstanceCapsule";
+import { TextInput } from "../components/TextInput";
+import { PuzzleIcon } from "../components/icons";
 import ui from "../styles/ui.module.css";
+import styles from "./PluginsPage.module.css";
 
-export function PluginsPage({
-  state,
-  focused,
-  runtime,
-  onState,
-  onError,
-}: {
-  state: LauncherState;
-  focused?: Instance;
-  runtime?: RuntimeInfo;
-  onState: (s: LauncherState) => void;
-  onError: (msg: string | null) => void;
-}) {
+export function PluginsPage() {
+  const { focused, runtime, run, refresh, restartInstance, openInstanceUrl, confirm, isBusy, reportError } =
+    useLauncher();
   const [query, setQuery] = useState("");
   const [curated, setCurated] = useState<CuratedCatalog | null>(null);
   const [stale, setStale] = useState(false);
   const [loading, setLoading] = useState(true);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
   const [devSpec, setDevSpec] = useState("");
   const [output, setOutput] = useState("");
+
+  const focusedId = focused?.id;
+  const focusedProfile = focused?.profile;
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const c = await api.fetchCurated();
+        if (cancelled) return;
+        setCurated(c.data && typeof c.data === "object" ? c.data : null);
+        setStale(Boolean(c.stale));
+        if (c.error) reportError(c.error);
+      } catch (e) {
+        if (!cancelled) reportError(errMessage(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reportError]);
+
+  const reloadInstalled = useCallback(async () => {
+    if (!focusedId) return;
+    try {
+      const list = await api.listInstalled(focusedId);
+      setInstalled(list);
+    } catch (e) {
+      reportError(errMessage(e));
+    }
+  }, [focusedId, reportError]);
+
+  useEffect(() => {
+    // 数据获取型 effect：reloadInstalled 内的 setState 全部发生在 await 之后
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void reloadInstalled();
+  }, [reloadInstalled, focusedProfile]);
 
   const merged = useMemo(() => mergeCatalogs(curated, null), [curated]);
   const shown = useMemo(() => filterPlugins(merged, "curated", query), [merged, query]);
 
-  async function reloadInstalled() {
+  if (!focused) return null;
+  const running = runtime?.status === "ready" || runtime?.status === "starting";
+  const anyPluginBusy = isBusy("plugin:");
+
+  async function runPluginArgs(args: string[], key: string) {
     if (!focused) return;
-    try {
-      setInstalled(await api.listInstalled(focused.id));
-    } catch (e) {
-      onError(errMessage(e));
-    }
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    onError(null);
-    setLoading(true);
-    void api
-      .fetchCurated()
-      .then((c) => {
-        if (cancelled) return;
-        setCurated(c.data && typeof c.data === "object" ? c.data : null);
-        setStale(Boolean(c.stale));
-        if (c.error) onError(c.error);
-      })
-      .catch((e) => {
-        if (!cancelled) onError(errMessage(e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    void reloadInstalled();
-  }, [focused?.id, focused?.profile]);
-
-  async function runArgs(args: string[], label: string) {
-    if (!focused) return;
-    setBusy(label);
-    onError(null);
-    try {
-      const text = await api.runPlugin(args, focused.id);
+    const text = await run(key, () => api.runPlugin(args, focused.id));
+    if (text !== undefined) {
       setOutput(text);
-      onState(await api.getState());
-      await reloadInstalled();
-    } catch (e) {
-      onError(errMessage(e));
-    } finally {
-      setBusy(null);
+      await refresh();
+      void reloadInstalled();
     }
   }
 
   async function installPlugin(plugin: MergedPlugin) {
     const plan = planFromKnownFields(plugin);
     if (!plan || plan.kind !== "ready" || !plan.args) {
-      onError(plan?.reason ?? "精选条目没有可用的安装目标。");
+      reportError(plan?.reason ?? t("plugins.noInstallTarget"));
       return;
     }
-    await runArgs(plan.args, plugin.key);
+    await runPluginArgs(plan.args, `plugin:add:${plugin.key}`);
   }
 
-  if (!focused) return null;
-  const running = runtime?.status === "ready" || runtime?.status === "starting";
+  async function removePlugin(name: string) {
+    const ok = await confirm({
+      title: t("plugins.removeTitle"),
+      body: t("plugins.removeConfirm", { name }),
+      confirmLabel: t("plugins.remove"),
+      danger: true,
+    });
+    if (ok) await runPluginArgs(["remove", name], `plugin:remove:${name}`);
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <header className="flex flex-wrap items-center gap-3 px-6 pt-6 pb-2">
         <div className="min-w-0">
-          <h1 className="m-0 text-[15px] font-semibold leading-[22px]">插件</h1>
-          <p className="mt-0.5 mb-0 text-xs leading-[18px] text-label-3">精选目录 · awesome-dsh-plugin.com</p>
+          <h1 className="m-0 text-[15px] font-semibold leading-[22px]">{t("plugins.title")}</h1>
+          <p className="mt-0.5 mb-0 text-xs leading-[18px] text-label-3">{t("plugins.subtitle")}</p>
         </div>
-        <InstanceCapsule
-          instances={state.config.instances}
-          focused={focused}
-          runtime={runtime}
-          onFocus={(id) => api.setFocused(id).then(onState).catch((e) => onError(errMessage(e)))}
-        />
-        <input
-          className="ml-auto w-56 rounded-md border border-border bg-input px-3 py-2 text-sm outline-none focus:border-ds"
+        <InstanceCapsule />
+        <TextInput
+          className="ml-auto w-56"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索名称或描述"
+          placeholder={t("plugins.searchPlaceholder")}
         />
       </header>
 
       {runtime?.needsRestart && running ? (
         <div className={`${ui.banner} mx-6 mt-3`}>
-          <span>插件层已变化，需要重启当前实例。</span>
-          <button type="button" className={ui.primary} onClick={() => api.restartInstance(focused.id).then(onState)}>
-            重启
-          </button>
+          <span>{t("plugins.needsRestart")}</span>
+          <Button variant="primary" busy={isBusy(`restart:${focused.id}`)} onClick={() => void restartInstance(focused.id)}>
+            {t("plugins.restart")}
+          </Button>
         </div>
       ) : null}
-      {stale ? <p className="mx-6 mt-2 mb-0 text-xs text-label-3">目录缓存已过期，正在显示上次成功的数据。</p> : null}
+      {stale ? <p className="mx-6 mt-2 mb-0 text-xs text-label-3">{t("plugins.staleCache")}</p> : null}
 
       <div className="flex min-h-0 flex-1 gap-4 overflow-hidden p-6 pt-4">
         <section className="min-w-0 flex-1 overflow-auto">
-          {loading ? <p className="m-0 text-sm text-label-3">正在拉取精选目录…</p> : null}
-          {!loading && shown.length === 0 ? <p className="m-0 text-sm text-label-3">没有匹配的精选插件。</p> : null}
+          {loading ? <p className="m-0 text-sm text-label-3">{t("plugins.loading")}</p> : null}
+          {!loading && shown.length === 0 ? (
+            <div className={styles.catalogEmpty}>
+              <PuzzleIcon className={styles.catalogEmptyIcon} />
+              <p className={styles.catalogEmptyText}>{t("plugins.empty")}</p>
+            </div>
+          ) : null}
           <ul className="m-0 flex list-none flex-col gap-3 p-0">
             {shown.map((p) => {
               const installedAs = findInstalledName(p, installed);
               const category = p.curatedEntry?.category;
+              const installing = isBusy(`plugin:add:${p.key}`);
               return (
                 <li key={p.key} className={`${ui.card} flex items-start justify-between gap-4 p-5`}>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-baseline gap-2">
                       <strong className="text-sm font-semibold">{p.name}</strong>
                       {category ? <span className={ui.badge}>{category}</span> : null}
-                      {installedAs ? <span className={`${ui.badge} ${ui.badgeAccent}`}>已装 · {installedAs}</span> : null}
+                      {installedAs ? (
+                        <span className={`${ui.badge} ${ui.badgeAccent}`}>
+                          {t("plugins.installedBadge", { name: installedAs })}
+                        </span>
+                      ) : null}
                     </div>
-                    <p className="mt-1 mb-0 text-[13px] leading-5 text-label-2">{p.description || "（无描述）"}</p>
-                    <p className="mt-1 mb-0 truncate text-xs text-label-3">{p.fullName}</p>
+                    <p className="mt-1 mb-0 text-[13px] leading-5 text-label-2">{p.description || t("plugins.noDesc")}</p>
+                    <p className="mt-1 mb-0 truncate text-xs text-label-3" title={p.fullName}>
+                      {p.fullName}
+                    </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      className={ui.ghost}
-                      onClick={() => api.openInstanceUrl(undefined, p.url).catch((e) => onError(errMessage(e)))}
-                    >
-                      仓库
-                    </button>
-                    <button
-                      type="button"
-                      className={ui.primary}
-                      disabled={Boolean(busy)}
+                    <Button onClick={() => void openInstanceUrl(undefined, p.url)}>{t("plugins.repo")}</Button>
+                    <Button
+                      variant="primary"
+                      busy={installing}
+                      disabled={anyPluginBusy && !installing}
                       onClick={() => void installPlugin(p)}
                     >
-                      {busy === p.key ? "安装中…" : installedAs ? "重新安装" : "安装"}
-                    </button>
+                      {installing ? t("plugins.installing") : installedAs ? t("plugins.reinstall") : t("plugins.install")}
+                    </Button>
                   </div>
                 </li>
               );
@@ -169,34 +173,33 @@ export function PluginsPage({
 
         <aside className="flex w-[280px] shrink-0 flex-col gap-4 overflow-auto">
           <section className={ui.card}>
-            <h2 className={ui.h2}>已装</h2>
-            {installed.length === 0 ? <p className="m-0 text-xs leading-[18px] text-label-3">当前实例还没有插件层。</p> : null}
+            <h2 className={ui.h2}>{t("plugins.installedTitle")}</h2>
+            {installed.length === 0 ? (
+              <p className="m-0 text-xs leading-[18px] text-label-3">{t("plugins.installedEmpty")}</p>
+            ) : null}
             {installed.map((p) => (
-              <div key={p.name} className="flex items-start justify-between gap-2 border-b border-border-subtle py-2.5 last:border-b-0 last:pb-0">
+              <div
+                key={p.name}
+                className="flex items-start justify-between gap-2 border-b border-border-subtle py-2.5 last:border-b-0 last:pb-0"
+              >
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium">{p.name}</div>
-                  <div className="text-xs text-label-3">{p.version || p.from || (p.builtin ? "内置" : "")}</div>
+                  <div className="text-xs text-label-3">{p.version || p.from || (p.builtin ? t("plugins.builtin") : "")}</div>
                 </div>
                 {p.builtin ? (
-                  <span className="shrink-0 text-[11px] text-label-3">内置</span>
+                  <span className="shrink-0 text-[11px] text-label-3">{t("plugins.builtin")}</span>
                 ) : (
                   <div className="flex shrink-0 gap-1">
-                    <button
-                      type="button"
-                      className={`${ui.tiny} ${ui.ghost}`}
-                      disabled={Boolean(busy)}
-                      onClick={() => void runArgs(["update", p.name], p.name)}
+                    <Button
+                      size="tiny"
+                      disabled={anyPluginBusy}
+                      onClick={() => void runPluginArgs(["update", p.name], `plugin:update:${p.name}`)}
                     >
-                      更新
-                    </button>
-                    <button
-                      type="button"
-                      className={`${ui.tiny} ${ui.danger}`}
-                      disabled={Boolean(busy)}
-                      onClick={() => void runArgs(["remove", p.name], p.name)}
-                    >
-                      卸载
-                    </button>
+                      {t("plugins.update")}
+                    </Button>
+                    <Button size="tiny" variant="danger" disabled={anyPluginBusy} onClick={() => void removePlugin(p.name)}>
+                      {t("plugins.remove")}
+                    </Button>
                   </div>
                 )}
               </div>
@@ -204,34 +207,31 @@ export function PluginsPage({
           </section>
 
           <section className={ui.card}>
-            <h2 className={ui.h2}>开发安装</h2>
-            <p className="mt-0 mb-3 text-xs leading-[18px] text-label-3">本地路径或手输 spec，不走精选目录。</p>
-            <input
-              className={`${ui.input} mb-2 font-mono text-xs`}
+            <h2 className={ui.h2}>{t("plugins.devTitle")}</h2>
+            <p className="mt-0 mb-3 text-xs leading-[18px] text-label-3">{t("plugins.devDesc")}</p>
+            <TextInput
+              className="mb-2 font-mono text-xs"
               value={devSpec}
               onChange={(e) => setDevSpec(e.target.value)}
-              placeholder="github:owner/repo"
+              placeholder={t("plugins.devPlaceholder")}
             />
             <div className="flex gap-2">
-              <button
-                type="button"
-                className={ui.ghost}
+              <Button
                 onClick={() =>
                   api.pickFolder().then((folder) => {
                     if (folder) setDevSpec(folder);
                   })
                 }
               >
-                选文件夹
-              </button>
-              <button
-                type="button"
-                className={ui.primary}
-                disabled={!devSpec.trim() || Boolean(busy)}
-                onClick={() => void runArgs(["add", devSpec.trim()], "dev")}
+                {t("plugins.pickFolder")}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!devSpec.trim() || anyPluginBusy}
+                onClick={() => void runPluginArgs(["add", devSpec.trim()], "plugin:add:dev")}
               >
-                安装
-              </button>
+                {t("plugins.devInstall")}
+              </Button>
             </div>
             {output ? (
               <pre className="mt-3 mb-0 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-[18px] text-label-2">

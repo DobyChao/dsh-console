@@ -1,42 +1,86 @@
-import type { ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function firstFocusable(root: HTMLElement | null): HTMLElement | null {
+  if (!root) return null;
+  return root.querySelector<HTMLElement>("[data-autofocus]") ?? root.querySelector<HTMLElement>(FOCUSABLE);
+}
+
+function trapTab(root: HTMLElement, e: KeyboardEvent) {
+  const items = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+  if (items.length === 0) return;
+  const active = document.activeElement as HTMLElement | null;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (e.shiftKey && (active === first || !root.contains(active))) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
 
 export function Modal({
   title,
   children,
   onClose,
-  footer,
+  width = 480,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
-  footer?: ReactNode;
+  /** 内容区最大宽度（px） */
+  width?: number;
 }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
+  const titleId = useId();
+
+  useEffect(() => {
+    restoreRef.current = document.activeElement as HTMLElement | null;
+    firstFocusable(boxRef.current)?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeRef.current();
+      } else if (e.key === "Tab" && boxRef.current) {
+        trapTab(boxRef.current, e);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      restoreRef.current?.focus?.();
+    };
+  }, []);
+
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
-      onClick={onClose}
-      role="presentation"
-    >
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6" role="presentation" onClick={onClose}>
       <div
-        className="flex w-full max-w-[520px] flex-col rounded-lg border border-border bg-surface p-6 shadow-card"
+        ref={boxRef}
+        className="modal-box flex w-full flex-col rounded-lg border border-border bg-surface p-6 shadow-card"
+        style={{ maxWidth: width }}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <h2 className="m-0 text-[15px] font-semibold leading-[22px] text-label">{title}</h2>
-          <button
-            type="button"
-            className="rounded-md px-2 py-1 text-xs text-label-3 hover:bg-hover hover:text-label"
-            onClick={onClose}
-          >
-            关闭
-          </button>
-        </div>
-        <div className="flex flex-col gap-4">{children}</div>
-        {footer ? <div className="mt-6 flex justify-end gap-2">{footer}</div> : null}
+        <h2 id={titleId} className="m-0 text-[15px] font-semibold leading-[22px]">
+          {title}
+        </h2>
+        {children}
       </div>
     </div>
   );
+}
+
+export function ModalFooterActions({ children }: { children: ReactNode }) {
+  return <div className="mt-6 flex justify-end gap-2">{children}</div>;
 }

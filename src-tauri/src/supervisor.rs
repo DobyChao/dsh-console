@@ -104,6 +104,12 @@ impl Supervisor {
             .map(|r| r.logs.iter().cloned().collect())
             .unwrap_or_default()
     }
+
+    pub fn clear_logs(&mut self, id: &str) {
+        if let Some(r) = self.running.get_mut(id) {
+            r.logs.clear();
+        }
+    }
 }
 
 pub fn port_in_use_by_us(sup: &Supervisor, instances: &[Instance], port: u16, except_id: &str) -> bool {

@@ -1,6 +1,7 @@
 import type {
   CatalogFilter,
   CuratedCatalog,
+  CuratedPlugin,
   DiscoveryCatalog,
   InstallPlan,
   InstalledPlugin,
@@ -13,8 +14,8 @@ import {
   resolveCatalogInstallReference,
 } from "./install-reference";
 
-function descText(value: CuratedCatalog["plugins"] extends (infer T)[] | undefined ? T : never): string {
-  const d = (value as { description?: { zh?: string; en?: string } | string }).description;
+function descText(entry: CuratedPlugin): string {
+  const d = entry.description;
   if (!d) return "";
   if (typeof d === "string") return d;
   return d.zh || d.en || "";
@@ -157,6 +158,10 @@ export function planFromKnownFields(plugin: MergedPlugin): InstallPlan | null {
   return null;
 }
 
+/**
+ * v1 UI 不用：README 安装命令解析入口，供后续发现目录 / README 安装流程复用
+ * （spec「插件获取规则」保留的参考实现）。精选目录一键安装走 planFromKnownFields。
+ */
 export function planFromReadme(
   plugin: MergedPlugin,
   currentProfile: string,

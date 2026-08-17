@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import type {
   CatalogPayload,
   CuratedCatalog,
@@ -58,7 +59,7 @@ function runtime(id: string, status: RuntimeInfo["status"], url?: string): Runti
   return { id, status, url: url ?? null, error: null, pid: status === "ready" ? 4242 : null, needsRestart: false };
 }
 
-let state: LauncherState = {
+const state: LauncherState = {
   config: {
     instances: [defaultInst, labInst],
     focusedId: "default",
@@ -217,7 +218,7 @@ export function browserInvoke<T>(cmd: string, args: Record<string, unknown> = {}
     case "start_instance": {
       const id = String(args.id);
       const inst = state.config.instances.find((item) => item.id === id);
-      if (!inst) return Promise.reject("找不到实例");
+      if (!inst) return Promise.reject(t("error.instanceNotFound"));
       setRuntime(id, runtime(id, "starting"));
       window.setTimeout(() => {
         const url = `http://127.0.0.1:${inst.port}`;
@@ -281,9 +282,14 @@ export function browserInvoke<T>(cmd: string, args: Record<string, unknown> = {}
         ].join("\n") as T,
       );
     case "run_plugin":
-      return Promise.resolve(`网页预览：未真正执行 dsh plugin ${(args.args as string[])?.join(" ") ?? ""}` as T);
+      return Promise.resolve(t("error.mockRunPlugin", { args: (args.args as string[])?.join(" ") ?? "" }) as T);
     case "list_installed":
       return Promise.resolve(structuredClone(installed) as T);
+    case "clear_logs": {
+      const id = String(args.id);
+      state.logs[id] = [];
+      return Promise.resolve(snapshot() as T);
+    }
     case "pick_folder":
       return Promise.resolve("C:\\Users\\Admin\\dsh-preview" as T);
     case "fetch_curated":
@@ -304,6 +310,6 @@ export function browserInvoke<T>(cmd: string, args: Record<string, unknown> = {}
       return Promise.resolve(port as T);
     }
     default:
-      return Promise.reject(`网页预览未实现命令：${cmd}`);
+      return Promise.reject(t("error.mockUnknownCmd", { cmd }) as T);
   }
 }

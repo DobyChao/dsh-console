@@ -332,6 +332,16 @@ fn next_instance_port(app: AppHandle) -> u16 {
     config::next_port(&g.config.instances)
 }
 
+#[tauri::command]
+fn clear_logs(app: AppHandle, id: String) -> LauncherState {
+    {
+        let state = app.state::<AppState>();
+        let mut g = state.lock();
+        g.supervisor.clear_logs(&id);
+    }
+    snapshot(&app)
+}
+
 pub(crate) fn http_dispatch(app: AppHandle, cmd: &str, args: serde_json::Value) -> serde_json::Value {
     fn ok(data: impl serde::Serialize) -> serde_json::Value {
         serde_json::json!({ "ok": true, "data": data })
@@ -394,6 +404,7 @@ pub(crate) fn http_dispatch(app: AppHandle, cmd: &str, args: serde_json::Value) 
             opt_string(&args, "branch"),
         ))),
         "next_instance_port" => ok(next_instance_port(app)),
+        "clear_logs" => ok(clear_logs(app, req_string(&args, "id"))),
         other => err(format!("未知命令：{other}")),
     }
 }
@@ -436,8 +447,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-            std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+            let config_root = app.path().config_dir().map_err(|e| e.to_string())?;
+            let legacy = app.path().app_config_dir().ok();
+            let config_dir = config::resolve_dir(&config_root, legacy.as_deref())?;
             let config = config::load_or_default(&config_dir)?;
             let http = reqwest::Client::builder()
                 .user_agent("dsh-console/0.1")
@@ -481,7 +493,8 @@ pub fn run() {
             fetch_curated,
             fetch_discovery,
             fetch_readme,
-            next_instance_port
+            next_instance_port,
+            clear_logs
         ]);
 
     builder

@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { t } from "../i18n";
 import { browserInvoke, browserListen } from "./browser-preview";
 import { isTauri } from "./runtime";
 import type {
@@ -17,17 +18,66 @@ import type {
 export type BackendKind = "tauri" | "http" | "mock";
 
 const BRIDGE = "http://127.0.0.1:1422";
-const listeners = new Set<(kind: BackendKind) => void>();
+const backendListeners = new Set<(kind: BackendKind) => void>();
 
 let kind: BackendKind = isTauri() ? "tauri" : "mock";
 let everHttp = false;
+let mockSettled = false;
 let probeTask: Promise<BackendKind> | null = null;
 
+// ---------------------------------------------------------------------------
+// 事件 fan-out：监听方只注册到本地 hub；实际通道（tauri listen / 共享 EventSource /
+// mock 发射器）按当前 backend 绑定，backend 切换（如 mock → http）时自动重绑，
+// 避免监听永远留在旧通道上。
+// ---------------------------------------------------------------------------
+type Handler = (payload: unknown) => void;
+const hub = new Map<string, Set<Handler>>();
+let unbindChannel: (() => void) | null = null;
+
+function dispatch(event: string, payload: unknown) {
+  hub.get(event)?.forEach((handler) => handler(payload));
+}
+
+function bindChannel() {
+  unbindChannel?.();
+  unbindChannel = null;
+  const events = [...hub.keys()];
+  if (events.length === 0) return;
+  if (kind === "tauri") {
+    const pending = events.map((ev) => tauriListen(ev, (e) => dispatch(ev, e.payload)));
+    unbindChannel = () => {
+      void Promise.all(pending).then((unsubs) => unsubs.forEach((u) => u()));
+    };
+  } else if (kind === "http") {
+    const source = new EventSource(`${BRIDGE}/events`);
+    const onFrame = (ev: MessageEvent) => {
+      try {
+        dispatch(ev.type, JSON.parse(ev.data));
+      } catch {
+        /* 忽略坏帧 */
+      }
+    };
+    events.forEach((ev) => source.addEventListener(ev, onFrame as EventListener));
+    unbindChannel = () => {
+      events.forEach((ev) => source.removeEventListener(ev, onFrame as EventListener));
+      source.close();
+    };
+  } else {
+    const unsubs = events.map((ev) => browserListen(ev, (e) => dispatch(ev, e.payload)));
+    unbindChannel = () => unsubs.forEach((u) => u());
+  }
+}
+
 function setKind(next: BackendKind) {
+  const prev = kind;
   if (next === "http") everHttp = true;
-  if (kind === next) return;
+  if (next === "mock") mockSettled = true;
+  if (next !== "mock") mockSettled = false;
   kind = next;
-  listeners.forEach((fn) => fn(kind));
+  if (prev !== next) {
+    bindChannel();
+    backendListeners.forEach((fn) => fn(kind));
+  }
 }
 
 async function probeHttp(): Promise<boolean> {
@@ -64,6 +114,9 @@ async function ensureBackend(): Promise<BackendKind> {
     }
     return "http";
   }
+  // 已判定 mock 后不再反复等探测：发现网页桥交给后台轮询，
+  // 否则纯预览模式下每次 invoke 都要空等一轮重试
+  if (mockSettled) return "mock";
   if (!probeTask) {
     probeTask = (async () => {
       if (await waitForHttp(8, 250)) {
@@ -80,14 +133,14 @@ async function ensureBackend(): Promise<BackendKind> {
 }
 
 export function subscribeBackend(fn: (kind: BackendKind) => void): () => void {
-  listeners.add(fn);
+  backendListeners.add(fn);
   if (isTauri()) {
     fn("tauri");
   } else {
     void ensureBackend().then(fn);
   }
   return () => {
-    listeners.delete(fn);
+    backendListeners.delete(fn);
   };
 }
 
@@ -101,8 +154,6 @@ if (!isTauri()) {
   }, 2000);
 }
 
-export const backendReady = ensureBackend();
-
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const resolved = await ensureBackend();
   if (resolved === "tauri") return tauriInvoke<T>(cmd, args);
@@ -111,9 +162,10 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
       return await httpInvoke<T>(cmd, args);
     } catch (e) {
       if (await probeHttp()) return httpInvoke<T>(cmd, args);
-      if (everHttp) throw "网页桥暂不可用，请确认桌面控制台仍在运行。";
+      // 真连过桥之后掉线必须报错，不允许静默退回假数据
+      if (everHttp) throw new Error(t("error.bridgeUnavailable"), { cause: e });
       setKind("mock");
-      throw e instanceof Error || typeof e === "string" ? e : "网页桥调用失败";
+      throw e instanceof Error ? e : new Error(t("error.bridgeFailed"), { cause: e });
     }
   }
   return browserInvoke<T>(cmd, args);
@@ -126,31 +178,25 @@ async function httpInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
     body: JSON.stringify({ cmd, args: args ?? {} }),
   });
   const json = (await res.json()) as { ok: boolean; data?: T; error?: string };
-  if (!json.ok) throw json.error || "网页桥调用失败";
+  if (!json.ok) throw new Error(json.error || t("error.bridgeFailed"));
   return json.data as T;
 }
 
-export function listen<T>(event: string, handler: (ev: { payload: T }) => void): Promise<() => void> {
-  return ensureBackend().then((resolved) => {
-    if (resolved === "tauri") return tauriListen<T>(event, handler);
-    if (resolved === "http" || everHttp) return httpListen(event, handler);
-    return browserListen(event, handler as (ev: { payload: unknown }) => void);
-  });
-}
-
-function httpListen<T>(event: string, handler: (ev: { payload: T }) => void): () => void {
-  const source = new EventSource(`${BRIDGE}/events`);
-  const onMessage = (ev: MessageEvent) => {
-    try {
-      handler({ payload: JSON.parse(ev.data) as T });
-    } catch {
-      /* ignore malformed frames */
-    }
-  };
-  source.addEventListener(event, onMessage);
+export function listen<T>(event: string, handler: (payload: T) => void): () => void {
+  let set = hub.get(event);
+  if (!set) {
+    set = new Set();
+    hub.set(event, set);
+    bindChannel();
+  }
+  const wrapped = handler as Handler;
+  set.add(wrapped);
   return () => {
-    source.removeEventListener(event, onMessage);
-    source.close();
+    set.delete(wrapped);
+    if (set.size === 0) {
+      hub.delete(event);
+      bindChannel();
+    }
   };
 }
 
@@ -173,6 +219,7 @@ export const api = {
     invoke<string>("dump_config", { profile: profile ?? null, id: id ?? null }),
   runPlugin: (args: string[], id?: string) => invoke<string>("run_plugin", { args, id: id ?? null }),
   listInstalled: (id?: string) => invoke<InstalledPlugin[]>("list_installed", { id: id ?? null }),
+  clearLogs: (id: string) => invoke<LauncherState>("clear_logs", { id }),
   pickFolder: () => invoke<string | null>("pick_folder"),
   fetchCurated: () => invoke<CatalogPayload<CuratedCatalog | null>>("fetch_curated"),
   fetchDiscovery: () => invoke<CatalogPayload<DiscoveryCatalog | null>>("fetch_discovery"),

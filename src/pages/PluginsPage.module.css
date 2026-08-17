@@ -1,0 +1,20 @@
+.catalogEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 0;
+}
+
+.catalogEmptyIcon {
+  width: 30px;
+  height: 30px;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0.7;
+}
+
+.catalogEmptyText {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+}

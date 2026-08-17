@@ -31,6 +31,8 @@
   font-size: 16px;
   line-height: 1;
   opacity: 0.55;
+  transition: background 200ms cubic-bezier(0.4, 0, 0.2, 1), color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .fold:hover {
@@ -46,8 +48,24 @@
 }
 
 .empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 12px;
+  text-align: center;
+}
+
+.emptyIcon {
+  width: 28px;
+  height: 28px;
   color: var(--dsw-alias-label-tertiary);
-  padding: 12px 6px;
+  opacity: 0.7;
+}
+
+.emptyText {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
   font-size: 13px;
   line-height: 20px;
 }
@@ -64,6 +82,7 @@
   padding: 10px 12px;
   margin-bottom: 4px;
   text-align: left;
+  transition: background 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .item:hover {
@@ -115,13 +134,27 @@
   padding: 14px 16px 18px;
   text-align: center;
   color: var(--dsw-alias-label-secondary);
+  transition: color 200ms cubic-bezier(0.4, 0, 0.2, 1), background 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .add:hover {
   color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.remove {
-  align-self: flex-start;
-  margin-left: 16px;
+.menu {
+  position: fixed;
+  min-width: 140px;
+  background: var(--dsw-specific-menu);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  padding: 6px;
+  z-index: 40;
+  box-shadow: 0 8px 24px var(--dsw-alias-bg-mask-2);
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  text-align: center;
 }
