@@ -1,8 +1,8 @@
-# dsh 控制台
+# DSH Console
 
-English | [中文](README_zh.md)
+English | [Chinese](README_zh.md)
 
-Desktop console for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): start and stop `dsh`, manage multiple `$DSH_HOME` instances, install plugins from the curated catalog. It only spawns the `dsh` CLI you already have.
+Desktop console for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): start and stop `dsh`, manage multiple `$DSH_HOME` instances, install plugins from the curated catalog. It only spawns the `dsh` CLI you already have. The app UI is Chinese.
 
 ## Run
 
@@ -17,8 +17,8 @@ pnpm tauri dev
 
 - Closing the window hides the console; tray **Quit** stops every process this app started.
 - Plugins come from [awesome-dsh-plugin](https://awesome-dsh-plugin.com/).
-- Config lives under the OS app-data dir (`%APPDATA%\dev.dsh.console\` on Windows), not inside a `DSH_HOME`.
+- Config lives under the OS app-data dir (`%APPDATA%\dsh-console\` on Windows), not inside a `DSH_HOME`.
 
 ## Development
 
-Spec: [docs/spec.md](docs/spec.md). For agents: [AGENTS.md](AGENTS.md).
+Spec (Chinese): [docs/spec.md](docs/spec.md). Agent guidelines (Chinese): [AGENTS.md](AGENTS.md).

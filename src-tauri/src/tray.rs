@@ -20,7 +20,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let mut builder = TrayIconBuilder::with_id("main")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("dsh 控制台")
+        .tooltip("DSH 控制台")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main(app),
             "start" => crate::tray_start_focused(app),
@@ -63,9 +63,9 @@ pub fn refresh_tray(app: &AppHandle, sup: &Supervisor, instances: &[Instance]) {
     });
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(if any_ready {
-            "dsh 控制台 · 运行中"
+            "DSH 控制台 · 运行中"
         } else {
-            "dsh 控制台"
+            "DSH 控制台"
         }));
     }
 }

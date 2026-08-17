@@ -69,8 +69,21 @@ pub struct InstancePatch {
     pub cwd: Option<String>,
 }
 
+pub const DIR_NAME: &str = "dsh-console";
+
 pub fn config_file(config_dir: &Path) -> PathBuf {
     config_dir.join("config.json")
+}
+
+pub fn resolve_dir(config_root: &Path, legacy: Option<&Path>) -> Result<PathBuf, String> {
+    let dir = config_root.join(DIR_NAME);
+    if !dir.exists() {
+        if let Some(old) = legacy.filter(|p| p.exists() && *p != dir.as_path()) {
+            let _ = fs::rename(old, &dir);
+        }
+    }
+    fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录：{e}"))?;
+    Ok(dir)
 }
 
 pub fn default_dsh_home() -> PathBuf {

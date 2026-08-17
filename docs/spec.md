@@ -1,4 +1,4 @@
-# dsh 控制台 — 实现规格
+# DSH 控制台 — 实现规格
 
 给在本仓库开新会话的代理：按本文实现，不必回 harness 会话或改 Cursor plan 文件。
 
@@ -42,7 +42,7 @@ Rust (std::process::Command + CREATE_NO_WINDOW)
   → dsh --profile <p> --dump-config
   → dsh -V / node -v / pnpm -v
 系统浏览器 ← opener 打开 http(s)
-配置文件 ← %APPDATA%/dev.dsh.console/ 下的 JSON
+配置文件 ← %APPDATA%/dsh-console/ 下的 JSON
 ```
 
 建议 Rust 拆分：
