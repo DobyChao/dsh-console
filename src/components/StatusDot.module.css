@@ -1,0 +1,24 @@
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.idle {
+  background: var(--dsw-static-neutral-bluish-400);
+}
+
+.starting,
+.stopping {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.ready {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.error {
+  background: var(--dsw-alias-state-error-primary);
+}

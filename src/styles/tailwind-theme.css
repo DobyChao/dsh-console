@@ -1,0 +1,31 @@
+@theme inline {
+  --font-sans: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, "Microsoft YaHei", monospace;
+
+  --color-ds: var(--dsw-static-deepseek-500);
+  --color-label: var(--dsw-alias-label-primary);
+  --color-label-2: var(--dsw-alias-label-secondary);
+  --color-label-3: var(--dsw-alias-label-tertiary);
+  --color-fg: var(--dsw-alias-label-primary-foreground);
+  --color-canvas: var(--dsw-alias-bg-base);
+  --color-platform: var(--dsw-alias-bg-module-platform);
+  --color-surface: var(--dsw-alias-bg-layer-1);
+  --color-sidebar: var(--dsw-specific-sidebar-fill);
+  --color-bubble: var(--dsw-specific-bubble);
+  --color-border: var(--dsw-alias-border-l2);
+  --color-border-subtle: var(--dsw-alias-border-l1);
+  --color-btn: var(--dsw-alias-button-primary-fill);
+  --color-btn-hover: var(--dsw-alias-button-primary-hover);
+  --color-hover: var(--dsw-alias-interactive-bg-hover);
+  --color-success: var(--dsw-alias-state-success-primary);
+  --color-warn: var(--dsw-alias-state-warn-label);
+  --color-error: var(--dsw-alias-state-error-primary);
+  --color-input: var(--dsw-specific-input-major);
+
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-rail: 10px;
+
+  --shadow-card: var(--dsw-shadow-lv1);
+  --ease-ds: cubic-bezier(0.4, 0, 0.2, 1);
+}

@@ -1,0 +1,163 @@
+.page {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  overflow: hidden;
+}
+
+.toolbar {
+  margin-top: -8px;
+}
+
+.statusCard,
+.logCard {
+  border-radius: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-shadow-lv1);
+}
+
+.statusCard {
+  padding: 20px 24px 22px;
+  flex-shrink: 0;
+}
+
+.cardHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.pageTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.metaRow {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  align-items: center;
+  gap: 16px;
+}
+
+.meta dt {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.meta dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--dsw-static-deepseek-500);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+}
+
+.link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.linkIcon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.textBtn,
+.clear {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+}
+
+.textBtn {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.textBtn:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+}
+
+.clear {
+  color: var(--dsw-static-deepseek-500);
+}
+
+.clear:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.logCard {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.logHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px 8px;
+}
+
+.logTitle {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.log {
+  margin: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 4px 20px 18px;
+  font-family: "JetBrains Mono", Consolas, "Microsoft YaHei", monospace;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.empty {
+  padding: 24px;
+  color: var(--dsw-alias-label-tertiary);
+}
