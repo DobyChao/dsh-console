@@ -1,4 +1,5 @@
 .dot {
+  position: relative;
   width: 8px;
   height: 8px;
   border-radius: 999px;
@@ -21,4 +22,29 @@
 
 .error {
   background: var(--dsw-alias-state-error-primary);
+}
+
+.starting::after,
+.stopping::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: inherit;
+  animation: dot-pulse 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes dot-pulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(2.2);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.2);
+  }
 }

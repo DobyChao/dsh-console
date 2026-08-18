@@ -56,6 +56,11 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+.optionCurrent {
+  background: var(--dsw-specific-bubble);
+  cursor: default;
+}
+
 .optionName {
   flex: 1;
   overflow: hidden;

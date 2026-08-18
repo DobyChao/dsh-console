@@ -62,7 +62,12 @@ export function Modal({
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6" role="presentation" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-6"
+      style={{ background: "var(--dsw-alias-bg-mask-1)" }}
+      role="presentation"
+      onClick={onClose}
+    >
       <div
         ref={boxRef}
         className="modal-box flex w-full flex-col rounded-lg border border-border bg-surface p-6 shadow-card"

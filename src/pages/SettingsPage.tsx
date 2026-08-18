@@ -6,6 +6,7 @@ import type { Appearance } from "../lib/types";
 import { Button } from "../components/Button";
 import { InstanceCapsule } from "../components/InstanceCapsule";
 import { TextInput } from "../components/TextInput";
+import { AlertIcon, CheckIcon } from "../components/icons";
 import ui from "../styles/ui.module.css";
 import styles from "./SettingsPage.module.css";
 
@@ -76,11 +77,18 @@ export function SettingsPage({ scrollToEnv }: { scrollToEnv: boolean }) {
           <ul className={styles.probe}>
             {(env?.items ?? []).map((item) => (
               <li key={item.id}>
-                <div>
-                  <strong>{item.name}</strong>
-                  <span className={item.ok ? styles.pass : styles.fail}>
-                    {item.ok ? t("settings.probeOk") : t("settings.probeFail")}
-                  </span>
+                {item.ok ? (
+                  <CheckIcon className={`${styles.probeIcon} ${styles.pass}`} />
+                ) : (
+                  <AlertIcon className={`${styles.probeIcon} ${styles.fail}`} />
+                )}
+                <div className={styles.probeBody}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span className={item.ok ? styles.pass : styles.fail}>
+                      {item.ok ? t("settings.probeOk") : t("settings.probeFail")}
+                    </span>
+                  </div>
                   <div className={ui.muted}>{item.detail || "—"}</div>
                   {!item.ok && item.hint ? <div className={styles.hint}>{item.hint}</div> : null}
                 </div>
