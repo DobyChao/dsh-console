@@ -55,6 +55,10 @@ fn persist(app: &AppHandle) -> Result<(), String> {
 fn snapshot(app: &AppHandle) -> LauncherState {
     let state = app.state::<AppState>();
     let g = state.lock();
+    snapshot_of(&g)
+}
+
+fn snapshot_of(g: &AppStateInner) -> LauncherState {
     let runtimes = g.supervisor.snapshot(&g.config.instances);
     let mut logs = HashMap::new();
     for inst in &g.config.instances {
@@ -120,16 +124,17 @@ fn upsert_instance(app: AppHandle, patch: config::InstancePatch) -> Result<Launc
 
 #[tauri::command]
 fn remove_instance(app: AppHandle, id: String) -> Result<LauncherState, String> {
-    let pid = {
+    let target = {
         let state = app.state::<AppState>();
         let mut g = state.lock();
         let instances = g.config.instances.clone();
-        let pid = supervisor::begin_stop(&app, &mut g.supervisor, &instances, &id);
+        let target = supervisor::begin_stop(&app, &mut g.supervisor, &instances, &id);
         config::remove(&mut g.config, &id)?;
-        pid
+        target
     };
-    if let Some(pid) = pid {
-        let _ = process::kill_tree(pid);
+    if let Some(target) = target {
+        let reaped = process::kill_stop_target(target);
+        supervisor::finalize_stop(&app, &id, reaped);
     }
     persist(&app)?;
     Ok(snapshot(&app))
@@ -159,27 +164,63 @@ fn probe_env(app: AppHandle) -> envcheck::EnvProbe {
 #[tauri::command]
 fn start_instance(app: AppHandle, id: String) -> Result<LauncherState, String> {
     let inst = instance_by_id(&app, &id)?;
-    {
+    let cfg = {
         let state = app.state::<AppState>();
         let mut g = state.lock();
+        match supervisor::start_gate(&g.supervisor, &id) {
+            supervisor::StartGate::AlreadyRunning => return Ok(snapshot_of(&g)),
+            supervisor::StartGate::Stopping => return Err("正在停止，请稍后再启动".into()),
+            supervisor::StartGate::Ready => {}
+        }
         let cfg = g.config.clone();
-        supervisor::start(&app, &mut g.supervisor, &cfg, &inst)?;
+        supervisor::begin_start(&app, &mut g.supervisor, &cfg, &inst)?;
         crate::tray::refresh_tray(&app, &g.supervisor, &cfg.instances);
+        cfg
+    };
+
+    let port = inst.port.to_string();
+    let extra = ["--profile", inst.profile.as_str(), "--port", port.as_str()];
+    let spawned = match process::spawn_dsh(&cfg, &extra, &inst.dsh_home, inst.cwd.as_deref(), true) {
+        Ok(s) => s,
+        Err(e) => {
+            let state = app.state::<AppState>();
+            let mut g = state.lock();
+            let instances = g.config.instances.clone();
+            supervisor::fail_start(&app, &mut g.supervisor, &instances, &id, e.clone());
+            crate::tray::refresh_tray(&app, &g.supervisor, &instances);
+            return Err(e);
+        }
+    };
+
+    let leftover = {
+        let state = app.state::<AppState>();
+        let mut g = state.lock();
+        let instances = g.config.instances.clone();
+        let leftover = supervisor::attach_spawned(&app, &mut g.supervisor, &instances, &id, spawned);
+        crate::tray::refresh_tray(&app, &g.supervisor, &instances);
+        leftover
+    };
+    if let Some(target) = leftover {
+        let reaped = process::kill_stop_target(target);
+        supervisor::finalize_stop(&app, &id, reaped);
     }
     Ok(snapshot(&app))
 }
 
 #[tauri::command]
 fn stop_instance(app: AppHandle, id: String) -> Result<LauncherState, String> {
-    let pid = {
+    let target = {
         let state = app.state::<AppState>();
         let mut g = state.lock();
         let instances = g.config.instances.clone();
         supervisor::begin_stop(&app, &mut g.supervisor, &instances, &id)
     };
-    if let Some(pid) = pid {
+    if let Some(target) = target {
+        let app2 = app.clone();
+        let id2 = id.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            let _ = process::kill_tree(pid);
+            let reaped = process::kill_stop_target(target);
+            supervisor::finalize_stop(&app2, &id2, reaped);
         });
     }
     Ok(snapshot(&app))
@@ -187,14 +228,20 @@ fn stop_instance(app: AppHandle, id: String) -> Result<LauncherState, String> {
 
 #[tauri::command]
 async fn restart_instance(app: AppHandle, id: String) -> Result<LauncherState, String> {
-    let pid = {
+    let target = {
         let state = app.state::<AppState>();
         let mut g = state.lock();
         let instances = g.config.instances.clone();
         supervisor::begin_stop(&app, &mut g.supervisor, &instances, &id)
     };
-    if let Some(pid) = pid {
-        let _ = tauri::async_runtime::spawn_blocking(move || process::kill_tree(pid)).await;
+    if let Some(target) = target {
+        let app2 = app.clone();
+        let id2 = id.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            let reaped = process::kill_stop_target(target);
+            supervisor::finalize_stop(&app2, &id2, reaped);
+        })
+        .await;
         let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(400))).await;
     }
     start_instance(app, id)
@@ -429,14 +476,22 @@ pub(crate) fn tray_open_focused(app: &AppHandle) {
 }
 
 pub(crate) fn quit_app(app: &AppHandle) {
-    let pids = {
+    let targets = {
         let state = app.state::<AppState>();
         let mut g = state.lock();
         let instances = g.config.instances.clone();
         supervisor::begin_stop_all(app, &mut g.supervisor, &instances)
     };
-    for pid in pids {
-        let _ = process::kill_tree(pid);
+    let joins: Vec<_> = targets
+        .into_iter()
+        .map(|target| {
+            std::thread::spawn(move || {
+                process::kill_stop_target_timeout(target, Duration::from_secs(2))
+            })
+        })
+        .collect();
+    for join in joins {
+        let _ = join.join();
     }
     app.exit(0);
 }
@@ -502,14 +557,22 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                let pids = {
+                let targets = {
                     let state = app.state::<AppState>();
                     let mut g = state.lock();
                     let instances = g.config.instances.clone();
                     supervisor::begin_stop_all(app, &mut g.supervisor, &instances)
                 };
-                for pid in pids {
-                    let _ = process::kill_tree(pid);
+                let joins: Vec<_> = targets
+                    .into_iter()
+                    .map(|target| {
+                        std::thread::spawn(move || {
+                            process::kill_stop_target_timeout(target, Duration::from_secs(2))
+                        })
+                    })
+                    .collect();
+                for join in joins {
+                    let _ = join.join();
                 }
             }
         });

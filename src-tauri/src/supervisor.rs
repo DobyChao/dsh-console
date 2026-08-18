@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::config::{homes_equal, Instance, LauncherConfig};
-use crate::process::{pipe_lines, spawn_dsh};
+use crate::process::{empty_slot, pipe_lines, ChildSlot, Spawned, StopTarget};
 
 const LOG_LIMIT: usize = 1800;
 
@@ -56,23 +56,31 @@ pub struct Running {
     pub pid: u32,
     pub runtime: RuntimeInfo,
     pub logs: VecDeque<String>,
+    child: ChildSlot,
 }
 
 impl Running {
-    fn new(id: String, pid: u32) -> Self {
+    fn starting(id: String) -> Self {
         Self {
-            pid,
+            pid: 0,
             runtime: RuntimeInfo {
                 id,
                 status: ProcStatus::Starting,
                 url: None,
                 error: None,
-                pid: Some(pid),
+                pid: None,
                 needs_restart: false,
             },
             logs: VecDeque::new(),
+            child: empty_slot(),
         }
     }
+}
+
+pub enum StartGate {
+    AlreadyRunning,
+    Stopping,
+    Ready,
 }
 
 pub struct Supervisor {
@@ -161,20 +169,21 @@ pub fn home_locked(sup: &Supervisor, instances: &[Instance], home: &str, except_
     None
 }
 
-pub fn start(
+pub fn start_gate(sup: &Supervisor, id: &str) -> StartGate {
+    match sup.running.get(id).map(|r| r.runtime.status) {
+        Some(ProcStatus::Starting | ProcStatus::Ready) => StartGate::AlreadyRunning,
+        Some(ProcStatus::Stopping) => StartGate::Stopping,
+        _ => StartGate::Ready,
+    }
+}
+
+/// Short critical section: preflight + mark Starting. Caller must spawn **outside** the lock.
+pub fn begin_start(
     app: &AppHandle,
     sup: &mut Supervisor,
     cfg: &LauncherConfig,
     inst: &Instance,
 ) -> Result<(), String> {
-    if let Some(r) = sup.running.get(&inst.id) {
-        if matches!(
-            r.runtime.status,
-            ProcStatus::Starting | ProcStatus::Ready | ProcStatus::Stopping
-        ) {
-            return Err("该实例已在运行".into());
-        }
-    }
     if let Some(name) = home_locked(sup, &cfg.instances, &inst.dsh_home, &inst.id) {
         return Err(format!("同一 DSH_HOME 已被实例「{name}」占用"));
     }
@@ -186,48 +195,104 @@ pub fn start(
     }
     bind_available(inst.port)?;
 
-    let extra = vec![
-        "--profile".to_string(),
-        inst.profile.clone(),
-        "--port".to_string(),
-        inst.port.to_string(),
-    ];
-    let extra_ref: Vec<&str> = extra.iter().map(|s| s.as_str()).collect();
-    let mut child = spawn_dsh(cfg, &extra_ref, &inst.dsh_home, inst.cwd.as_deref(), true)?;
-    let pid = child.id();
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let (tx, rx) = mpsc::channel::<i32>();
-    crate::process::wait_child_exit(child, tx);
+    if let Some(old) = sup.running.remove(&inst.id) {
+        if let Ok(mut slot) = old.child.lock() {
+            if let Some(mut child) = slot.take() {
+                let _ = child.start_kill();
+            }
+        }
+    }
 
-    let mut running = Running::new(inst.id.clone(), pid);
+    let mut running = Running::starting(inst.id.clone());
     push_log(
         app,
         &mut running,
-        format!("启动 pid={pid}  profile={}  port={}  home={}", inst.profile, inst.port, inst.dsh_home),
+        format!(
+            "启动 profile={}  port={}  home={}",
+            inst.profile, inst.port, inst.dsh_home
+        ),
     );
     sup.running.insert(inst.id.clone(), running);
     emit_runtimes(app, sup, &cfg.instances);
+    Ok(())
+}
+
+pub fn fail_start(app: &AppHandle, sup: &mut Supervisor, instances: &[Instance], id: &str, err: String) {
+    if let Some(running) = sup.running.get_mut(id) {
+        if running.runtime.status != ProcStatus::Starting {
+            return;
+        }
+        running.runtime.status = ProcStatus::Error;
+        running.runtime.error = Some(err.clone());
+        running.runtime.pid = None;
+        push_log(app, running, format!("启动失败：{err}"));
+    }
+    crate::tray::refresh_tray(app, sup, instances);
+    emit_runtimes(app, sup, instances);
+}
+
+/// Attach the spawned tree. If the user already clicked stop (or removed the instance),
+/// return the child so the caller can kill it **after** dropping AppState.
+pub fn attach_spawned(
+    app: &AppHandle,
+    sup: &mut Supervisor,
+    instances: &[Instance],
+    id: &str,
+    mut spawned: Spawned,
+) -> Option<StopTarget> {
+    let pid = spawned.child.id();
+    let stdout = spawned.child.stdout().take();
+    let stderr = spawned.child.stderr().take();
+
+    let Some(running) = sup.running.get_mut(id) else {
+        pipe_lines(stdout, |_| {});
+        pipe_lines(stderr, |_| {});
+        return Some(StopTarget {
+            pid,
+            child: Some(spawned.child),
+        });
+    };
+    if running.runtime.status == ProcStatus::Stopping {
+        pipe_lines(stdout, |_| {});
+        pipe_lines(stderr, |_| {});
+        return Some(StopTarget {
+            pid,
+            child: Some(spawned.child),
+        });
+    }
+
+    running.pid = pid;
+    running.runtime.pid = Some(pid);
+    push_log(app, running, format!("已启动 pid={pid}"));
 
     let app_out = app.clone();
-    let id_out = inst.id.clone();
+    let id_out = id.to_string();
     pipe_lines(stdout, move |line| {
         handle_line(&app_out, &id_out, line, false);
     });
     let app_err = app.clone();
-    let id_err = inst.id.clone();
+    let id_err = id.to_string();
     pipe_lines(stderr, move |line| {
         handle_line(&app_err, &id_err, line, true);
     });
 
+    let slot = running.child.clone();
+    {
+        let mut g = slot.lock().expect("child slot");
+        *g = Some(spawned.child);
+    }
+    let (tx, rx) = mpsc::channel::<i32>();
+    crate::process::watch_child_exit(slot, tx);
     let app_wait = app.clone();
-    let id_wait = inst.id.clone();
+    let id_wait = id.to_string();
     thread::spawn(move || {
-        let code = rx.recv().unwrap_or(1);
-        on_exit(&app_wait, &id_wait, code);
+        if let Ok(code) = rx.recv() {
+            on_exit(&app_wait, &id_wait, code);
+        }
     });
 
-    Ok(())
+    emit_runtimes(app, sup, instances);
+    None
 }
 
 fn handle_line(app: &AppHandle, id: &str, line: String, is_err: bool) {
@@ -269,9 +334,16 @@ fn on_exit(app: &AppHandle, id: &str, code: i32) {
     let mut g = state.lock();
     let instances = g.config.instances.clone();
     if let Some(running) = g.supervisor.running.get_mut(id) {
-        let stopping = running.runtime.status == ProcStatus::Stopping;
         running.runtime.pid = None;
         running.runtime.url = None;
+        running.runtime.needs_restart = false;
+        if running.runtime.status == ProcStatus::Idle {
+            // stop 已经收尾过，避免 wait() 晚到时把 Idle 改成 Error
+            crate::tray::refresh_tray(app, &g.supervisor, &instances);
+            emit_runtimes(app, &g.supervisor, &instances);
+            return;
+        }
+        let stopping = running.runtime.status == ProcStatus::Stopping;
         if stopping {
             running.runtime.status = ProcStatus::Idle;
             running.runtime.error = None;
@@ -291,36 +363,74 @@ fn on_exit(app: &AppHandle, id: &str, code: i32) {
             }
             push_log(app, running, format!("进程退出，代码 {code}"));
         }
-        running.runtime.needs_restart = false;
     }
     crate::tray::refresh_tray(app, &g.supervisor, &instances);
     emit_runtimes(app, &g.supervisor, &instances);
 }
 
-/// Mark stopping and return the pid to kill **after** dropping AppState.
-pub fn begin_stop(app: &AppHandle, sup: &mut Supervisor, instances: &[Instance], id: &str) -> Option<u32> {
+/// Mark stopping and take the child **after** dropping AppState.
+pub fn begin_stop(app: &AppHandle, sup: &mut Supervisor, instances: &[Instance], id: &str) -> Option<StopTarget> {
     let running = sup.running.get_mut(id)?;
-    if running.runtime.pid.is_none() {
-        running.runtime.status = ProcStatus::Idle;
+    if !matches!(
+        running.runtime.status,
+        ProcStatus::Starting | ProcStatus::Ready
+    ) {
         return None;
     }
     running.runtime.status = ProcStatus::Stopping;
     let pid = running.pid;
+    let child = running.child.lock().ok().and_then(|mut g| g.take());
+    if pid == 0 && child.is_none() {
+        // spawn 还没回来；attach_spawned 看到 Stopping 会把子进程交回来杀
+        push_log(app, running, "正在停止（等待进程句柄）…".into());
+        emit_runtimes(app, sup, instances);
+        crate::tray::refresh_tray(app, sup, instances);
+        return None;
+    }
     push_log(app, running, format!("正在停止 pid={pid} …"));
     emit_runtimes(app, sup, instances);
     crate::tray::refresh_tray(app, sup, instances);
-    Some(pid)
+    Some(StopTarget { pid, child })
 }
 
-pub fn begin_stop_all(app: &AppHandle, sup: &mut Supervisor, instances: &[Instance]) -> Vec<u32> {
+pub fn begin_stop_all(app: &AppHandle, sup: &mut Supervisor, instances: &[Instance]) -> Vec<StopTarget> {
     let ids: Vec<String> = sup.running.keys().cloned().collect();
-    let mut pids = Vec::new();
+    let mut targets = Vec::new();
     for id in ids {
-        if let Some(pid) = begin_stop(app, sup, instances, &id) {
-            pids.push(pid);
+        if let Some(target) = begin_stop(app, sup, instances, &id) {
+            targets.push(target);
         }
     }
-    pids
+    targets
+}
+
+/// 杀进程返回后若 wait() 仍未把状态从 Stopping 清掉，由这里收尾，避免 UI 卡在「停止中」。
+pub fn finalize_stop(app: &AppHandle, id: &str, reaped: bool) {
+    let state = app.state::<crate::AppState>();
+    let mut g = state.lock();
+    let instances = g.config.instances.clone();
+    let mut changed = false;
+    if let Some(running) = g.supervisor.running.get_mut(id) {
+        if running.runtime.status == ProcStatus::Stopping {
+            running.runtime.pid = None;
+            running.runtime.url = None;
+            running.runtime.needs_restart = false;
+            if reaped {
+                running.runtime.status = ProcStatus::Idle;
+                running.runtime.error = None;
+                push_log(app, running, "已停止".into());
+            } else {
+                running.runtime.status = ProcStatus::Error;
+                running.runtime.error = Some("未能结束进程。若端口仍被占用，请结束残留的 node/dsh 后重试。".into());
+                push_log(app, running, "停止失败：进程仍在运行".into());
+            }
+            changed = true;
+        }
+    }
+    if changed {
+        crate::tray::refresh_tray(app, &g.supervisor, &instances);
+        emit_runtimes(app, &g.supervisor, &instances);
+    }
 }
 
 pub fn mark_needs_restart(sup: &mut Supervisor, id: &str) {
