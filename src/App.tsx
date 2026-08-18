@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AddInstanceDialog } from "./components/AddInstanceDialog";
+import { AlertIcon } from "./components/icons";
 import { IconRail } from "./components/IconRail";
 import { InstanceList } from "./components/InstanceList";
 import { PluginsPage } from "./pages/PluginsPage";
@@ -59,8 +60,9 @@ export default function App() {
         ) : null}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-platform">
           {error ? (
-            <div className="mx-4 mt-3 flex items-start justify-between gap-3 rounded-lg bg-error p-2.5 text-white">
-              <pre className="m-0 whitespace-pre-wrap text-xs">{error}</pre>
+            <div className={`${ui.errorBanner} mx-4 mt-3`}>
+              <AlertIcon className={ui.bannerIcon} />
+              <pre className="m-0 flex-1 whitespace-pre-wrap text-xs">{error}</pre>
               <button type="button" className={ui.tiny} onClick={dismissError}>
                 {t("common.close")}
               </button>
@@ -71,7 +73,7 @@ export default function App() {
             <RunPage visible={page === "run"} listCollapsed={collapsed} onExpandList={() => setCollapsed(false)} />
           </div>
           <div className="flex min-h-0 flex-1 flex-col" style={{ display: page === "plugins" ? "flex" : "none" }}>
-            <PluginsPage />
+            <PluginsPage visible={page === "plugins"} />
           </div>
           <div className="flex min-h-0 flex-1 flex-col" style={{ display: page === "settings" ? "flex" : "none" }}>
             <SettingsPage scrollToEnv={scrollToEnv} />

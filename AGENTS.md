@@ -2,7 +2,7 @@
 
 DeepSeek Harness 的旁路桌面控制台：启停 `dsh`、管理多个 `DSH_HOME` 实例、按社区精选目录安装 profile bundle。它不是 harness 本体，也不嵌入聊天 UI。
 
-**动手前先读 [docs/spec.md](docs/spec.md)**。完整产品规格、CLI 契约、UI 与交互规范、插件获取规则、实现进度都在 spec 里；本文件只列必须遵守的约束，不重复 spec 细节。布局、配色、三栏结构、状态点等视觉规范以 spec 的「窗口结构」「环境检查」章节为准，改动前先核对。
+**动手前先读 [docs/spec.md](docs/spec.md)**。完整产品规格、CLI 契约、UI 与交互规范、插件获取规则、实现进度都在 spec 里；当前实现状态与近期改动见 [docs/progress.md](docs/progress.md)。本文件只列必须遵守的约束，不重复 spec 细节。布局、配色、三栏结构、状态点等视觉规范以 spec 的「窗口结构」「环境检查」章节为准，改动前先核对。
 
 ## 红线
 

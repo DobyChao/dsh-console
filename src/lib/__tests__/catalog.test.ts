@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { filterPlugins, findInstalledName, mergeCatalogs, planFromKnownFields } from "../catalog";
+import {
+  catalogCategories,
+  filterPlugins,
+  findInstalledName,
+  mergeCatalogs,
+  planFromKnownFields,
+} from "../catalog";
 import type { CuratedCatalog, DiscoveryCatalog, DiscoveryRepo, InstalledPlugin, MergedPlugin } from "../types";
 
 const curated: CuratedCatalog = {
@@ -78,9 +84,46 @@ describe("filterPlugins", () => {
     expect(filterPlugins(all, "curated", "").map((p) => p.fullName)).toEqual(["dsh-market/tools", "someone/no-npm"]);
   });
 
+  it("按分类筛选，并可与搜索叠加", () => {
+    expect(filterPlugins(all, "curated", "", "tools").map((p) => p.name)).toEqual(["tools"]);
+    expect(filterPlugins(all, "curated", "no-npm", "tools")).toEqual([]);
+    // 空分类等于不筛
+    expect(filterPlugins(all, "curated", "", null)).toHaveLength(2);
+  });
+
   it("搜索匹配名称、全名、描述", () => {
     expect(filterPlugins(all, "curated", "中文")).toHaveLength(1);
     expect(filterPlugins(all, "all", "plain/plain")).toHaveLength(1);
+  });
+});
+
+describe("catalogCategories", () => {
+  it("统计条目数并取目录自带的中文名，无分类的条目不计入", () => {
+    const merged = mergeCatalogs(curated, null);
+    // curated 里 tools 有分类、no-npm 没有
+    expect(catalogCategories(merged, curated.categories)).toEqual([
+      { key: "tools", label: "工具", count: 1 },
+    ]);
+  });
+
+  it("缺中文名时回落英文名，再回落 key", () => {
+    const merged = mergeCatalogs(curated, null);
+    expect(catalogCategories(merged, { tools: { en: "Tools" } })[0].label).toBe("Tools");
+    expect(catalogCategories(merged, undefined)[0].label).toBe("tools");
+  });
+
+  it("按条目数降序", () => {
+    const many: CuratedCatalog = {
+      plugins: [
+        { name: "a", owner: "o", url: "https://github.com/o/a", category: "ui" },
+        { name: "b", owner: "o", url: "https://github.com/o/b", category: "ui" },
+        { name: "c", owner: "o", url: "https://github.com/o/c", category: "git" },
+      ],
+    };
+    expect(catalogCategories(mergeCatalogs(many, null)).map((c) => [c.key, c.count])).toEqual([
+      ["ui", 2],
+      ["git", 1],
+    ]);
   });
 });
 

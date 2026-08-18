@@ -1,3 +1,185 @@
+.chips {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+  /*
+   * 全局那条 10px 滚动条压在 chip 行下面太抢眼。用标准属性收细：Chromium 里一旦声明
+   * scrollbar-width，同元素上的 ::-webkit-scrollbar-* 就会被忽略，所以这里不要混用。
+   */
+  scrollbar-width: thin;
+  scrollbar-color: var(--dsw-alias-border-l3) transparent;
+}
+
+.chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background 200ms cubic-bezier(0.4, 0, 0.2, 1), color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chip:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.chipOn {
+  border-color: transparent;
+  background: var(--dsw-specific-bubble);
+  color: var(--dsw-static-deepseek-500);
+}
+
+.chipOn:hover {
+  background: var(--dsw-specific-bubble);
+  color: var(--dsw-static-deepseek-500);
+}
+
+.chipCount {
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.chipOn .chipCount {
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* 一张白卡装下整个目录：1200 条独立卡片的描边会把页面切得很碎 */
+.listCard {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-shadow-lv1);
+}
+
+.listNote {
+  margin: 0;
+  padding: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+}
+
+.scroller {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.spacer {
+  position: relative;
+}
+
+.rows {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 高度由 ROW_HEIGHT 内联给定，窗口化按它算区间；改这里的 padding 要同步改常量 */
+.row {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  transition: background 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.row:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.rowMain {
+  min-width: 0;
+  flex: 1;
+}
+
+.rowTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
+}
+
+.rowName {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 仓库路径信息量最低，推到行尾并压成弱色 */
+.rowRepo {
+  min-width: 0;
+  overflow: hidden;
+  margin-left: auto;
+  padding-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 8 + 20 + 1 + 18 + 8 + 1px 分隔线 = 56，正好等于 ROW_HEIGHT */
+.rowDesc {
+  overflow: hidden;
+  height: 18px;
+  margin: 1px 0 0;
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rowActions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 安装是「选中某条后」的动作，默认描边；悬停整行才升为主按钮 */
+.installBtn {
+  min-width: 56px;
+  justify-content: center;
+  padding: 5px 12px;
+  border-color: var(--dsw-alias-border-l2);
+  font-size: 12px;
+}
+
+.row:hover .installBtn:not(:disabled),
+.installBtn:focus-visible:not(:disabled) {
+  border-color: transparent;
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
 .catalogEmpty {
   display: flex;
   flex-direction: column;
@@ -17,4 +199,71 @@
   margin: 0;
   color: var(--dsw-alias-label-tertiary);
   font-size: 13px;
+}
+
+.repoLink {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0.45;
+  transition: background 200ms cubic-bezier(0.4, 0, 0.2, 1), color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.row:hover .repoLink,
+.repoLink:focus-visible {
+  opacity: 1;
+}
+
+.repoLink:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.repoIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.installedHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.refreshBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-tertiary);
+  transition: background 200ms cubic-bezier(0.4, 0, 0.2, 1), color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.refreshBtn:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.refreshIcon {
+  width: 14px;
+  height: 14px;
+}
+
+.spinning {
+  animation: refresh-spin 800ms linear infinite;
+}
+
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

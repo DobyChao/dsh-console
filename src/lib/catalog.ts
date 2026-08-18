@@ -79,13 +79,19 @@ export function mergeCatalogs(
   return [...map.values()].sort((a, b) => b.stars - a.stars || a.name.localeCompare(b.name));
 }
 
-export function filterPlugins(list: MergedPlugin[], filter: CatalogFilter, query: string): MergedPlugin[] {
+export function filterPlugins(
+  list: MergedPlugin[],
+  filter: CatalogFilter,
+  query: string,
+  category?: string | null,
+): MergedPlugin[] {
   const q = query.trim().toLowerCase();
   return list.filter((p) => {
     if (filter === "curated" && !p.curated) return false;
     if (filter === "verified") {
       if (p.projectType !== "plugin" || !p.verified) return false;
     }
+    if (category && p.curatedEntry?.category !== category) return false;
     if (!q) return true;
     return (
       p.name.toLowerCase().includes(q) ||
@@ -93,6 +99,34 @@ export function filterPlugins(list: MergedPlugin[], filter: CatalogFilter, query
       p.description.toLowerCase().includes(q)
     );
   });
+}
+
+export interface CatalogCategory {
+  key: string;
+  label: string;
+  count: number;
+}
+
+/**
+ * 精选目录的分类 + 条目数，按条目数降序。分类的中文名取自目录自身的 `categories`
+ * 映射（远端数据，和插件名 / 描述同一性质），缺失时回落到英文名、再回落到 key。
+ */
+export function catalogCategories(
+  list: MergedPlugin[],
+  labels?: CuratedCatalog["categories"],
+): CatalogCategory[] {
+  const counts = new Map<string, number>();
+  for (const p of list) {
+    const key = p.curatedEntry?.category?.trim();
+    if (!key) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([key, count]) => {
+      const label = labels?.[key];
+      return { key, label: label?.zh || label?.en || key, count };
+    })
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "zh"));
 }
 
 function pnpmArgsFromCandidate(args: string[] | undefined, fallbackSpec: string): string[] {
