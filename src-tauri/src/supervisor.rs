@@ -313,11 +313,11 @@ fn handle_line(app: &AppHandle, id: &str, line: String, is_err: bool) {
             running.runtime.error = None;
             became_ready = true;
         }
-        if is_err && line.contains("allowBuilds") {
+        if is_err && (line.contains("allowBuilds") || line.contains("IGNORED_BUILDS") || line.contains("approve-builds")) {
             push_log(
                 app,
                 running,
-                "提示：把 pnpm 打印的键写进该 profile 的 pnpm-workspace.yaml / package.json 的 pnpm.allowBuilds，然后重试。".into(),
+                "提示：pnpm 拦住了依赖构建脚本。安装时会按 pnpm 点名的包写入 allowBuilds 并重试。".into(),
             );
         }
         push_log(app, running, line);

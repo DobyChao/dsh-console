@@ -19,11 +19,11 @@ import { AlertIcon, ExternalLinkIcon, PuzzleIcon, RefreshIcon } from "../compone
 import ui from "../styles/ui.module.css";
 import styles from "./PluginsPage.module.css";
 
-/** 必须�?.row 的实际高度一致，窗口化按它算区间 */
+/** 必须与 .row 的实际高度一致，窗口化按它算区间 */
 const ROW_HEIGHT = 56;
 
 export function PluginsPage({ visible }: { visible: boolean }) {
-  const { focused, runtime, run, refresh, restartInstance, openInstanceUrl, confirm, isBusy, reportError } =
+  const { focused, runtime, run, restartInstance, openInstanceUrl, confirm, isBusy, reportError } =
     useLauncher();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
@@ -67,10 +67,13 @@ export function PluginsPage({ visible }: { visible: boolean }) {
     }
   }, [focusedId, reportError]);
 
+  const runtimeStatus = runtime?.status;
+  const starting = runtimeStatus === "starting" || runtimeStatus === "stopping";
+
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || starting) return;
     void reloadInstalled();
-  }, [reloadInstalled, focusedProfile, visible]);
+  }, [reloadInstalled, focusedProfile, visible, starting]);
 
   const merged = useMemo(() => mergeCatalogs(curated, null), [curated]);
   const shown = useMemo(
@@ -91,6 +94,7 @@ export function PluginsPage({ visible }: { visible: boolean }) {
   if (!focused) return null;
   const running = runtime?.status === "ready" || runtime?.status === "starting";
   const anyPluginBusy = isBusy("plugin:");
+  const pluginLocked = starting || anyPluginBusy;
   const refreshingInstalled = isBusy(`installed:${focused.id}`);
 
   async function refreshInstalled() {
@@ -103,7 +107,6 @@ export function PluginsPage({ visible }: { visible: boolean }) {
     const text = await run(key, () => api.runPlugin(args, focused.id));
     if (text !== undefined) {
       setOutput(text);
-      await refresh();
       void reloadInstalled();
     }
   }
@@ -153,6 +156,9 @@ export function PluginsPage({ visible }: { visible: boolean }) {
         />
       </header>
 
+      {starting ? (
+        <p className="mx-6 mt-2 mb-0 text-xs leading-[18px] text-label-3">{t("plugins.waitUntilReady")}</p>
+      ) : null}
       {runtime?.needsRestart && running ? (
         <div className={`${ui.banner} mx-6 mt-3`}>
           <span className="flex items-center gap-2">
@@ -257,7 +263,7 @@ export function PluginsPage({ visible }: { visible: boolean }) {
                             size="tiny"
                             className={styles.installBtn}
                             busy={installing}
-                            disabled={anyPluginBusy && !installing}
+                            disabled={pluginLocked && !installing}
                             onClick={() => void installPlugin(p)}
                           >
                             {installing
@@ -285,7 +291,7 @@ export function PluginsPage({ visible }: { visible: boolean }) {
                 className={styles.refreshBtn}
                 title={t("plugins.refreshInstalled")}
                 aria-label={t("plugins.refreshInstalled")}
-                disabled={refreshingInstalled}
+                disabled={refreshingInstalled || starting}
                 onClick={() => void refreshInstalled()}
               >
                 <RefreshIcon className={clsx(styles.refreshIcon, refreshingInstalled && styles.spinning)} />
@@ -295,7 +301,7 @@ export function PluginsPage({ visible }: { visible: boolean }) {
               <p className="m-0 text-xs leading-[18px] text-label-3">{t("plugins.installedEmpty")}</p>
             ) : null}
             {installed.map((p) => {
-              // 内置由右侧标签负责，caption 不再重复写一�?
+              // 内置由右侧标签负责，caption 不再重复写一遍
               const caption = p.version || p.from || "";
               return (
                 <div
@@ -318,12 +324,12 @@ export function PluginsPage({ visible }: { visible: boolean }) {
                     <div className="flex shrink-0 gap-1">
                       <Button
                         size="tiny"
-                        disabled={anyPluginBusy}
+                        disabled={pluginLocked}
                         onClick={() => void runPluginArgs(["update", p.name], `plugin:update:${p.name}`)}
                       >
                         {t("plugins.update")}
                       </Button>
-                      <Button size="tiny" variant="danger" disabled={anyPluginBusy} onClick={() => void removePlugin(p.name)}>
+                      <Button size="tiny" variant="danger" disabled={pluginLocked} onClick={() => void removePlugin(p.name)}>
                         {t("plugins.remove")}
                       </Button>
                     </div>
@@ -354,7 +360,7 @@ export function PluginsPage({ visible }: { visible: boolean }) {
               </Button>
               <Button
                 variant="primary"
-                disabled={!devSpec.trim() || anyPluginBusy}
+                disabled={!devSpec.trim() || pluginLocked}
                 onClick={() => void runPluginArgs(["add", devSpec.trim()], "plugin:add:dev")}
               >
                 {t("plugins.devInstall")}

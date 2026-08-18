@@ -144,7 +144,7 @@ Windows spawn（硬性）：
 - 不要让 Rust 直接 `Command::new("dsh")`（`.cmd` shim）。用 `cmd /D /C <bin> <args…>`，并设 `CREATE_NO_WINDOW`（`0x08000000`）。
 - `pnpm`、`node` 同样走 cmd。
 - checkout 模式：`cmd /D /C pnpm --dir <checkout> dsh --profile … --port …`
-- git 依赖失败时 pnpm 会提 `allowBuilds`：把 stderr 原文展示出来，并加一句可行动提示（改 profile 目录的 `pnpm-workspace.yaml` / `package.json` pnpm.allowBuilds）。第一版不必自动改文件。
+- git / 原生依赖失败时 pnpm ≥11 会报 `ERR_PNPM_IGNORED_BUILDS`。stderr 原文照常展示。安装 / 更新时，把 pnpm 点名的包以及 `pnpm-workspace.yaml` 里尚未抉择的占位符（`set this to true or false`）写成 `allowBuilds: true`，然后自动重试一次。已是 `true`/`false` 的键不改。实例处于启动中 / 停止中时拒绝装卸插件（Windows 上会与正在起来的进程抢 `node_modules` 而卡住）。
 - `pnpm not found`：dsh 自己会写「install pnpm to manage profile plugins」。设置页对应行给同样提示。
 
 ---

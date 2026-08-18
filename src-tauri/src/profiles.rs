@@ -133,8 +133,51 @@ pub fn run_plugin(
     let abs: Vec<String> = pnpm_args.iter().map(|a| absolutize_spec(a)).collect();
     let mut extra = vec!["plugin".to_string(), "--profile".to_string(), profile.to_string()];
     extra.extend(abs);
+    let mutating = matches!(pnpm_args.first().map(String::as_str), Some("add" | "update" | "install"));
+    let dir = profile_dir(home, profile);
+    if mutating {
+        let _ = crate::pnpm_builds::approve_pending_builds(&dir, &[]);
+    }
     let refs: Vec<&str> = extra.iter().map(|s| s.as_str()).collect();
     let cap = capture_dsh(cfg, &refs, home, cwd, Duration::from_secs(600))?;
+    let mut text = collect_plugin_output(&cap);
+    if cap.code != 0 && mutating {
+        let ignored = crate::pnpm_builds::ignored_build_packages(&text);
+        match crate::pnpm_builds::approve_pending_builds(&dir, &ignored) {
+            Ok(changed) if !changed.is_empty() => {
+                text.push_str(&format!(
+                    "\n已在 {} 的 pnpm-workspace.yaml 写入 allowBuilds: {}，正在重试…",
+                    crate::config::display_path(&dir),
+                    changed.join(", ")
+                ));
+                let retry = capture_dsh(cfg, &refs, home, cwd, Duration::from_secs(600))?;
+                let retry_text = collect_plugin_output(&retry);
+                if !retry_text.trim().is_empty() {
+                    text.push('\n');
+                    text.push_str(&retry_text);
+                }
+                if retry.code == 0 {
+                    return Ok(text);
+                }
+                return Err(with_allow_builds_hint(&text));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                text.push('\n');
+                text.push_str(&e);
+            }
+        }
+    }
+    if cap.code != 0 {
+        if text.trim().is_empty() {
+            return Err(format!("插件命令失败，退出码 {}", cap.code));
+        }
+        return Err(with_allow_builds_hint(&text));
+    }
+    Ok(text)
+}
+
+fn collect_plugin_output(cap: &crate::process::Captured) -> String {
     let mut text = String::new();
     if !cap.stdout.trim().is_empty() {
         text.push_str(&cap.stdout);
@@ -145,18 +188,21 @@ pub fn run_plugin(
         }
         text.push_str(&cap.stderr);
     }
-    if cap.stderr.contains("allowBuilds") || cap.stdout.contains("allowBuilds") {
-        text.push_str(
-            "\ngit 依赖被 pnpm 拦住了：把上面打印的键写进该 profile 目录的 pnpm-workspace.yaml 或 package.json 的 pnpm.allowBuilds，然后重试。",
+    text
+}
+
+fn with_allow_builds_hint(text: &str) -> String {
+    if crate::pnpm_builds::looks_like_ignored_builds(text)
+        || text.contains("allowBuilds")
+        || text.contains("approve-builds")
+    {
+        let mut out = text.to_string();
+        out.push_str(
+            "\npnpm 拦住了依赖的安装脚本。已尝试写入该 profile 的 pnpm-workspace.yaml allowBuilds；若仍失败，把 pnpm 打印的包名设为 true 后重试。",
         );
+        return out;
     }
-    if cap.code != 0 {
-        if text.trim().is_empty() {
-            return Err(format!("插件命令失败，退出码 {}", cap.code));
-        }
-        return Err(text);
-    }
-    Ok(text)
+    text.to_string()
 }
 
 pub fn list_installed(

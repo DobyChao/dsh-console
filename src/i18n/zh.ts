@@ -98,6 +98,7 @@ const zh = {
   "plugins.remove": "卸载",
   "plugins.removeTitle": "卸载插件",
   "plugins.removeConfirm": "确定从当前实例卸载 {name}？",
+  "plugins.waitUntilReady": "实例正在启动或停止，就绪后再装卸插件。",
   "plugins.devTitle": "开发安装",
   "plugins.devDesc": "本地路径或手输 spec，不走精选目录。",
   "plugins.devPlaceholder": "github:owner/repo",

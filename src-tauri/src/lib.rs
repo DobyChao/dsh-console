@@ -5,6 +5,7 @@ mod envcheck;
 mod http_bridge;
 mod process;
 mod profiles;
+mod pnpm_builds;
 mod supervisor;
 mod tray;
 
@@ -19,7 +20,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use config::{Instance, LauncherConfig};
-use supervisor::{RuntimeInfo, Supervisor};
+use supervisor::{ProcStatus, RuntimeInfo, Supervisor};
 
 pub struct AppStateInner {
     pub config: LauncherConfig,
@@ -331,11 +332,32 @@ fn dump_config(app: AppHandle, profile: Option<String>, id: Option<String>) -> R
 }
 
 #[tauri::command]
-fn run_plugin(app: AppHandle, args: Vec<String>, id: Option<String>) -> Result<String, String> {
+async fn run_plugin(app: AppHandle, args: Vec<String>, id: Option<String>) -> Result<String, String> {
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || run_plugin_inner(app2, args, id))
+        .await
+        .map_err(|e| format!("插件命令中断：{e}"))?
+}
+
+fn run_plugin_inner(app: AppHandle, args: Vec<String>, id: Option<String>) -> Result<String, String> {
     let inst = match id {
         Some(i) => instance_by_id(&app, &i)?,
         None => focused_instance(&app)?,
     };
+    let mutating = matches!(args.first().map(String::as_str), Some("add" | "update" | "install" | "remove"));
+    if mutating {
+        let state = app.state::<AppState>();
+        let g = state.lock();
+        match g.supervisor.running.get(&inst.id).map(|r| r.runtime.status) {
+            Some(ProcStatus::Starting) => {
+                return Err("实例正在启动，请就绪后再装卸插件。".into());
+            }
+            Some(ProcStatus::Stopping) => {
+                return Err("实例正在停止，请稍后再装卸插件。".into());
+            }
+            _ => {}
+        }
+    }
     let state = app.state::<AppState>();
     let cfg = { state.lock().config.clone() };
     let out = profiles::run_plugin(&cfg, &inst.dsh_home, &inst.profile, &args, inst.cwd.as_deref())?;
@@ -349,7 +371,14 @@ fn run_plugin(app: AppHandle, args: Vec<String>, id: Option<String>) -> Result<S
 }
 
 #[tauri::command]
-fn list_installed(app: AppHandle, id: Option<String>) -> Result<Vec<profiles::InstalledPlugin>, String> {
+async fn list_installed(app: AppHandle, id: Option<String>) -> Result<Vec<profiles::InstalledPlugin>, String> {
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || list_installed_inner(app2, id))
+        .await
+        .map_err(|e| format!("列出已装插件中断：{e}"))?
+}
+
+fn list_installed_inner(app: AppHandle, id: Option<String>) -> Result<Vec<profiles::InstalledPlugin>, String> {
     let inst = match id {
         Some(i) => instance_by_id(&app, &i)?,
         None => focused_instance(&app)?,
@@ -459,9 +488,9 @@ pub(crate) fn http_dispatch(app: AppHandle, cmd: &str, args: serde_json::Value) 
                 .get("args")
                 .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
                 .unwrap_or_default();
-            result(run_plugin(app, plugin_args, opt_string(&args, "id")))
+            result(run_plugin_inner(app, plugin_args, opt_string(&args, "id")))
         }
-        "list_installed" => result(list_installed(app, opt_string(&args, "id"))),
+        "list_installed" => result(list_installed_inner(app, opt_string(&args, "id"))),
         "pick_folder" => result(pick_folder(app)),
         "fetch_curated" => ok(tauri::async_runtime::block_on(fetch_curated(app))),
         "fetch_discovery" => ok(tauri::async_runtime::block_on(fetch_discovery(app))),
