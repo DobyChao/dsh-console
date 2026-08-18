@@ -206,7 +206,7 @@ export const api = {
   upsertInstance: (patch: InstancePatch) => invoke<LauncherState>("upsert_instance", { patch }),
   removeInstance: (id: string) => invoke<LauncherState>("remove_instance", { id }),
   setFocused: (id: string) => invoke<LauncherState>("set_focused", { id }),
-  probeEnv: () => invoke<EnvProbe>("probe_env"),
+  probeEnv: (force = true) => invoke<EnvProbe>("probe_env", { force }),
   startInstance: (id: string) => invoke<LauncherState>("start_instance", { id }),
   stopInstance: (id: string) => invoke<LauncherState>("stop_instance", { id }),
   restartInstance: (id: string) => invoke<LauncherState>("restart_instance", { id }),

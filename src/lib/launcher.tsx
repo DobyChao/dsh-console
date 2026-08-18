@@ -61,7 +61,7 @@ interface LauncherContextValue {
   restartInstance(id: string): Promise<void>;
   openInstanceUrl(id?: string, url?: string): Promise<void>;
   clearLogs(id: string): Promise<void>;
-  probeEnv(): Promise<void>;
+  probeEnv(force?: boolean): Promise<void>;
 }
 
 const LauncherContext = createContext<LauncherContextValue | null>(null);
@@ -136,9 +136,12 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const probeEnv = useCallback(async () => {
+  const probeSeq = useRef(0);
+  const probeEnv = useCallback(async (force = true) => {
+    const seq = ++probeSeq.current;
     await run("probe", async () => {
-      setEnv(await api.probeEnv());
+      const env = await api.probeEnv(force);
+      if (seq === probeSeq.current) setEnv(env);
     });
   }, [run]);
 
@@ -148,7 +151,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     try {
       const s = await api.getState();
       applyResponse(s, reqId, startedAt);
-      setEnv(await api.probeEnv());
+      setEnv(await api.probeEnv(true));
     } catch (e) {
       setError(errMessage(e));
     }
@@ -195,10 +198,10 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     async (id: string) => {
       await run(`focus:${id}`, async (ctx) => {
         applyResponse(await api.setFocused(id), ctx.reqId, ctx.startedAt);
-        setEnv(await api.probeEnv());
       });
+      void probeEnv(false);
     },
-    [applyResponse, run],
+    [applyResponse, probeEnv, run],
   );
 
   // 设置保存串行执行，patch 在执行时与最新 config 合并，避免并发读-改-写互相覆盖
@@ -230,7 +233,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
 
   const addInstance = useCallback(
     async (patch: InstancePatch) => {
-      const ok = await run("add-instance", async (ctx) => {
+      const key = patch.id ? `save-instance:${patch.id}` : "add-instance";
+      const ok = await run(key, async (ctx) => {
         applyResponse(await api.upsertInstance(patch), ctx.reqId, ctx.startedAt);
         return true;
       });

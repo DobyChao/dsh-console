@@ -26,29 +26,82 @@ pub struct EnvProbe {
     pub git_hint: Option<String>,
 }
 
+/// node / dsh / pnpm / git 与焦点无关，切实例时可以复用。
+#[derive(Debug, Clone)]
+pub struct ToolProbe {
+    pub node: ProbeItem,
+    pub dsh: ProbeItem,
+    pub pnpm: ProbeItem,
+    pub git: ProbeItem,
+}
+
 pub fn probe(cfg: &LauncherConfig) -> EnvProbe {
-    let node = probe_version("node", &["-v".into()], None, "Node.js", "安装 Node 22+ 并确保 node 在 PATH 上。");
-    let dsh = probe_dsh(cfg);
-    let pnpm = probe_version(
-        "pnpm",
-        &["-v".into()],
-        None,
-        "pnpm",
-        "install pnpm to manage profile plugins",
-    );
+    assemble(cfg, &probe_tools(cfg))
+}
+
+pub fn probe_tools(cfg: &LauncherConfig) -> ToolProbe {
+    std::thread::scope(|s| {
+        let node = s.spawn(|| {
+            probe_version(
+                "node",
+                &["-v".into()],
+                None,
+                "Node.js",
+                "安装 Node 22+ 并确保 node 在 PATH 上。",
+            )
+        });
+        let dsh = s.spawn(|| probe_dsh(cfg));
+        let pnpm = s.spawn(|| {
+            probe_version(
+                "pnpm",
+                &["-v".into()],
+                None,
+                "pnpm",
+                "install pnpm to manage profile plugins",
+            )
+        });
+        let git = s.spawn(|| {
+            probe_version(
+                "git",
+                &["--version".into()],
+                None,
+                "git",
+                "缺少 git 只影响 github: 安装。",
+            )
+        });
+        ToolProbe {
+            node: node.join().unwrap_or_else(|_| failed("node", "Node.js")),
+            dsh: dsh.join().unwrap_or_else(|_| failed("dsh", "dsh")),
+            pnpm: pnpm.join().unwrap_or_else(|_| failed("pnpm", "pnpm")),
+            git: git.join().unwrap_or_else(|_| failed("git", "git")),
+        }
+    })
+}
+
+pub fn assemble(cfg: &LauncherConfig, tools: &ToolProbe) -> EnvProbe {
     let home = probe_home(cfg);
-
-    let items = vec![node, dsh, pnpm, home];
+    let items = vec![tools.node.clone(), tools.dsh.clone(), tools.pnpm.clone(), home];
     let first_failure = items.iter().find(|i| !i.ok).map(|i| i.hint.clone());
-    let ok = first_failure.is_none();
-
-    let git = probe_version("git", &["--version".into()], None, "git", "缺少 git 只影响 github: 安装。");
     EnvProbe {
-        ok,
+        ok: first_failure.is_none(),
         first_failure,
         items,
-        git_ok: git.ok,
-        git_hint: if git.ok { None } else { Some(git.hint) },
+        git_ok: tools.git.ok,
+        git_hint: if tools.git.ok {
+            None
+        } else {
+            Some(tools.git.hint.clone())
+        },
+    }
+}
+
+fn failed(id: &str, name: &str) -> ProbeItem {
+    ProbeItem {
+        id: id.into(),
+        name: name.into(),
+        ok: false,
+        detail: Some("探测线程异常退出".into()),
+        hint: String::new(),
     }
 }
 

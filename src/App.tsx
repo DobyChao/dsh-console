@@ -15,7 +15,7 @@ export default function App() {
   const { state, env, backend, error, dismissError } = useLauncher();
   const [page, setPage] = useState<PageId>("run");
   const [collapsed, setCollapsed] = useState(false);
-  const [adding, setAdding] = useState(false);
+  const [instanceForm, setInstanceForm] = useState<{ id?: string } | null>(null);
   const [scrollToEnv, setScrollToEnv] = useState(false);
 
   if (!state) {
@@ -55,7 +55,8 @@ export default function App() {
           <InstanceList
             collapsed={collapsed}
             onToggleCollapsed={() => setCollapsed(true)}
-            onAdd={() => setAdding(true)}
+            onAdd={() => setInstanceForm({})}
+            onEdit={(id) => setInstanceForm({ id })}
           />
         ) : null}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-platform">
@@ -79,7 +80,9 @@ export default function App() {
             <SettingsPage scrollToEnv={scrollToEnv} />
           </div>
         </main>
-        {adding ? <AddInstanceDialog onClose={() => setAdding(false)} /> : null}
+        {instanceForm ? (
+          <AddInstanceDialog instanceId={instanceForm.id} onClose={() => setInstanceForm(null)} />
+        ) : null}
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * 黑盒冒烟：mock 后端下整棵 App 树的渲染与基础交互。
- * 不校验业务细节，只保证三页、添加对话框、右键菜单、确认流程能跑通。
+ * 不校验业务细节，只保证三页、添加/编辑对话框、实例操作菜单、确认流程能跑通。
  * 注意：mock 数据是模块内单例，最后一个用例删除的「实验室」不要在更早的用例里依赖。
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -84,12 +84,23 @@ test("添加实例对话框：填 Home 后提交并出现在列表里", async ()
   });
 });
 
+test("实例 ⋯ 菜单可打开编辑对话框", async () => {
+  await renderApp();
+  // 焦点仍是「默认」（就绪 → 主按钮「停止」）；点另一条的 ⋯ 不得切走焦点
+  expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+  fireEvent.click(screen.getAllByRole("button", { name: "实例操作" })[1]);
+  expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+  fireEvent.click(await screen.findByRole("menuitem", { name: "编辑" }));
+  expect(await screen.findByRole("heading", { name: "编辑实例" })).toBeTruthy();
+  expect((screen.getByLabelText("显示名") as HTMLInputElement).value).toBe("实验室");
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+});
+
 test("右键实例 → 删除菜单 → 确认后移除", async () => {
   await renderApp();
   // 列表项按钮（不是设置页表格里的同名文本）
   fireEvent.contextMenu(screen.getByRole("button", { name: /实验室/ }));
-  const remove = await screen.findByRole("menuitem");
-  expect(remove.textContent).toBe("删除");
+  const remove = await screen.findByRole("menuitem", { name: "删除" });
   fireEvent.click(remove);
   const dialog = await screen.findByRole("dialog");
   expect(dialog.textContent).toContain("实验室");

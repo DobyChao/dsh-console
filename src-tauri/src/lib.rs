@@ -28,6 +28,7 @@ pub struct AppStateInner {
 
 pub struct AppState {
     inner: Mutex<AppStateInner>,
+    probe_cache: Mutex<Option<envcheck::ToolProbe>>,
     pub http: reqwest::Client,
     pub config_dir: PathBuf,
 }
@@ -97,17 +98,22 @@ fn get_state(app: AppHandle) -> LauncherState {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, patch: config::SettingsPatch) -> Result<LauncherState, String> {
-    {
-        let state = app.state::<AppState>();
-        let mut g = state.lock();
-        g.config.dsh_mode = patch.dsh_mode;
-        g.config.dsh_path = patch.dsh_path.filter(|s| !s.trim().is_empty());
-        g.config.checkout_path = patch.checkout_path.filter(|s| !s.trim().is_empty());
-        g.config.appearance = patch.appearance;
-        config::sanitize(&mut g.config);
-    }
-    persist(&app)?;
-    Ok(snapshot(&app))
+        let invalidate_tools = {
+            let state = app.state::<AppState>();
+            let mut g = state.lock();
+            let before = (g.config.dsh_mode.clone(), g.config.dsh_path.clone(), g.config.checkout_path.clone());
+            g.config.dsh_mode = patch.dsh_mode;
+            g.config.dsh_path = patch.dsh_path.filter(|s| !s.trim().is_empty());
+            g.config.checkout_path = patch.checkout_path.filter(|s| !s.trim().is_empty());
+            g.config.appearance = patch.appearance;
+            config::sanitize(&mut g.config);
+            before != (g.config.dsh_mode.clone(), g.config.dsh_path.clone(), g.config.checkout_path.clone())
+        };
+        persist(&app)?;
+        if invalidate_tools {
+            *app.state::<AppState>().probe_cache.lock().expect("probe cache") = None;
+        }
+        Ok(snapshot(&app))
 }
 
 #[tauri::command]
@@ -155,10 +161,24 @@ fn set_focused(app: AppHandle, id: String) -> Result<LauncherState, String> {
 }
 
 #[tauri::command]
-fn probe_env(app: AppHandle) -> envcheck::EnvProbe {
+fn probe_env(app: AppHandle, force: Option<bool>) -> envcheck::EnvProbe {
+    let force = force.unwrap_or(true);
     let state = app.state::<AppState>();
-    let g = state.lock();
-    envcheck::probe(&g.config)
+    let cfg = { state.lock().config.clone() };
+    let cached = if force {
+        None
+    } else {
+        state.probe_cache.lock().expect("probe cache").clone()
+    };
+    let tools = match cached {
+        Some(t) => t,
+        None => {
+            let t = envcheck::probe_tools(&cfg);
+            *state.probe_cache.lock().expect("probe cache") = Some(t.clone());
+            t
+        }
+    };
+    envcheck::assemble(&cfg, &tools)
 }
 
 #[tauri::command]
@@ -424,7 +444,7 @@ pub(crate) fn http_dispatch(app: AppHandle, cmd: &str, args: serde_json::Value) 
         },
         "remove_instance" => result(remove_instance(app, req_string(&args, "id"))),
         "set_focused" => result(set_focused(app, req_string(&args, "id"))),
-        "probe_env" => ok(probe_env(app)),
+        "probe_env" => ok(probe_env(app, args.get("force").and_then(|v| v.as_bool()))),
         "start_instance" => result(start_instance(app, req_string(&args, "id"))),
         "stop_instance" => result(stop_instance(app, req_string(&args, "id"))),
         "restart_instance" => {
@@ -515,6 +535,7 @@ pub fn run() {
                     config,
                     supervisor: Supervisor::new(),
                 }),
+                probe_cache: Mutex::new(None),
                 http,
                 config_dir,
             });

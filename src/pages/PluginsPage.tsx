@@ -68,10 +68,9 @@ export function PluginsPage({ visible }: { visible: boolean }) {
   }, [focusedId, reportError]);
 
   useEffect(() => {
-    // 数据获取�?effect：reloadInstalled 内的 setState 全部发生�?await 之后
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!visible) return;
     void reloadInstalled();
-  }, [reloadInstalled, focusedProfile]);
+  }, [reloadInstalled, focusedProfile, visible]);
 
   const merged = useMemo(() => mergeCatalogs(curated, null), [curated]);
   const shown = useMemo(

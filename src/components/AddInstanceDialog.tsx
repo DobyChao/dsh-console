@@ -18,13 +18,23 @@ function folderName(path: string): string {
   return path.split(/[/\\]/).filter(Boolean).pop() ?? "";
 }
 
-export function AddInstanceDialog({ onClose }: { onClose: () => void }) {
-  const { addInstance, isBusy } = useLauncher();
-  const [draft, setDraft] = useState<Draft>({ displayName: "", dshHome: "", port: "3081" });
+export function AddInstanceDialog({ instanceId, onClose }: { instanceId?: string; onClose: () => void }) {
+  const { state, addInstance, isBusy } = useLauncher();
+  const editing = instanceId ? state?.config.instances.find((i) => i.id === instanceId) : undefined;
+  const [draft, setDraft] = useState<Draft>(() =>
+    editing
+      ? { displayName: editing.displayName, dshHome: editing.dshHome, port: String(editing.port) }
+      : { displayName: "", dshHome: "", port: "3081" },
+  );
   const [errors, setErrors] = useState<{ home?: string; port?: string }>({});
-  const submitting = isBusy("add-instance");
+  const submitting = Boolean(editing ? isBusy(`save-instance:${editing.id}`) : isBusy("add-instance"));
 
   useEffect(() => {
+    if (instanceId && !editing) onClose();
+  }, [instanceId, editing, onClose]);
+
+  useEffect(() => {
+    if (editing) return;
     let cancelled = false;
     api
       .nextInstancePort()
@@ -35,7 +45,7 @@ export function AddInstanceDialog({ onClose }: { onClose: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [editing]);
 
   function patch(next: Partial<Draft>) {
     setDraft((d) => ({ ...d, ...next }));
@@ -63,23 +73,24 @@ export function AddInstanceDialog({ onClose }: { onClose: () => void }) {
   async function submit() {
     if (!validate()) return;
     const p: InstancePatch = {
+      ...(editing ? { id: editing.id } : {}),
       displayName: draft.displayName.trim() || folderName(draft.dshHome) || t("addInstance.defaultName"),
       dshHome: draft.dshHome.trim(),
       port: Number(draft.port.trim()),
-      profile: "web",
+      profile: editing?.profile ?? "web",
     };
     if (await addInstance(p)) onClose();
   }
 
   return (
-    <Modal title={t("addInstance.title")} onClose={onClose}>
+    <Modal title={editing ? t("instances.editTitle") : t("addInstance.title")} onClose={onClose}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
-        <p className="mt-2 mb-5 text-[13px] leading-5 text-label-3">{t("addInstance.desc")}</p>
+        <p className="mt-2 mb-5 text-[13px] leading-5 text-label-3">{editing ? t("addInstance.editDesc") : t("addInstance.desc")}</p>
 
         <label className={ui.label} htmlFor="add-instance-home">
           {t("addInstance.homeLabel")}
@@ -87,7 +98,7 @@ export function AddInstanceDialog({ onClose }: { onClose: () => void }) {
         <div className={`${ui.row} mb-1`}>
           <TextInput
             id="add-instance-home"
-            data-autofocus
+            data-autofocus={!editing}
             className="font-mono text-[13px]"
             invalid={Boolean(errors.home)}
             value={draft.dshHome}
@@ -106,6 +117,7 @@ export function AddInstanceDialog({ onClose }: { onClose: () => void }) {
         </label>
         <TextInput
           id="add-instance-name"
+          data-autofocus={Boolean(editing)}
           className="mb-4"
           value={draft.displayName}
           onChange={(e) => patch({ displayName: e.target.value })}
@@ -132,7 +144,7 @@ export function AddInstanceDialog({ onClose }: { onClose: () => void }) {
         <ModalFooterActions>
           <Button onClick={onClose}>{t("common.cancel")}</Button>
           <Button type="submit" variant="primary" busy={submitting} disabled={!draft.dshHome.trim()}>
-            {t("addInstance.submit")}
+            {editing ? t("addInstance.save") : t("addInstance.submit")}
           </Button>
         </ModalFooterActions>
       </form>
